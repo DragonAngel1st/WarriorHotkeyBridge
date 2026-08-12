@@ -114,7 +114,8 @@
 
     <!-- There is nothing to reconfigure; the tray icon and appsettings.json are the controls. -->
     <Property Id="ARPNOMODIFY" Value="1" />
-    <Property Id="ARPHELPLINK" Value="https://github.com/" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/DragonAngel1st/WarriorHotkeyBridge" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/DragonAngel1st/WarriorHotkeyBridge" />
 
     <Feature Id="Main" Title="Warrior Hotkey Bridge" Level="1">
       <ComponentGroupRef Id="ProductFiles" />

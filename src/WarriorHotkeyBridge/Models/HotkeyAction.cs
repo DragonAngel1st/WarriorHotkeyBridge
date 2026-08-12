@@ -59,6 +59,26 @@ internal sealed record HotkeyAction
     /// <summary>True when firing this action puts input into the page.</summary>
     public bool DispatchesInput => Kind is HotkeyActionKind.SendKeys;
 
+    /// <summary>
+    /// True when firing this action should bring the SIM tab and its window to the front.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Includes <see cref="HotkeyActionKind.Test"/>, which sends nothing. That is the whole point
+    /// of it: Test exists to rehearse what a trading key does, so the operator can confirm the
+    /// path works without risking an order. A rehearsal that quietly skips a step is worse than
+    /// none, because it reports success for a path it never took - and raising the window is
+    /// exactly the step most likely to fail on a given machine, since it depends on window
+    /// matching across monitors with different DPI scaling.
+    /// </para>
+    /// <para>
+    /// Excludes <see cref="HotkeyActionKind.Diagnostics"/>. That writes a report and has no
+    /// relationship to the trading window; pulling Chrome in front of whatever the operator was
+    /// reading would be an unrelated side effect.
+    /// </para>
+    /// </remarks>
+    public bool ActivatesWindow => Kind is HotkeyActionKind.SendKeys or HotkeyActionKind.Test;
+
     /// <summary>Short form for logs and the tray, e.g. <c>Shift+1 (Buy 75% BP)</c>.</summary>
     public string Describe() => Kind switch
     {

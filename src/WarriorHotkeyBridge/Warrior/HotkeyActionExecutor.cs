@@ -117,6 +117,34 @@ internal sealed class HotkeyActionExecutor : IHotkeyActionExecutor
             return Fail(action, failure ?? "targeting failed", timings, started);
         }
 
+        // ---- Activation ----
+        // Before the non-dispatching early return, not after it, so Test rehearses the same path
+        // a trading key takes. Test's purpose is to answer "would this work?" without risking an
+        // order, and an answer that skipped the window activation would be answering a different
+        // question from the one asked.
+        if (action.ActivatesWindow)
+        {
+            long activationStart = Stopwatch.GetTimestamp();
+
+            try
+            {
+                bool raised = await _activator.ActivateAsync(page, cancellationToken).ConfigureAwait(false);
+
+                if (!raised)
+                {
+                    // The tab is active even when the window could not be raised, so a chord will
+                    // still land correctly. Worth a log line, not worth refusing to trade.
+                    _logger.CommandWindowNotRaised();
+                }
+            }
+            catch (Exception ex) when (ex is PlaywrightException or TimeoutException)
+            {
+                return Fail(action, $"could not activate the SIM window: {ex.Message}", timings, started);
+            }
+
+            timings = timings with { Activation = Stopwatch.GetElapsedTime(activationStart) };
+        }
+
         // ---- Non-dispatching actions stop here ----
         if (!action.DispatchesInput)
         {
@@ -142,27 +170,6 @@ internal sealed class HotkeyActionExecutor : IHotkeyActionExecutor
                 Timings = timings,
             };
         }
-
-        // ---- Activation ----
-        long activationStart = Stopwatch.GetTimestamp();
-
-        try
-        {
-            bool raised = await _activator.ActivateAsync(page, cancellationToken).ConfigureAwait(false);
-
-            if (!raised)
-            {
-                // The tab is active even when the window could not be raised, so the chord will
-                // still land correctly. Worth a log line, not worth refusing to trade.
-                _logger.CommandWindowNotRaised();
-            }
-        }
-        catch (Exception ex) when (ex is PlaywrightException or TimeoutException)
-        {
-            return Fail(action, $"could not activate the SIM window: {ex.Message}", timings, started);
-        }
-
-        timings = timings with { Activation = Stopwatch.GetElapsedTime(activationStart) };
 
         // ---- Dispatch: exactly once, never retried ----
         long dispatchStart = Stopwatch.GetTimestamp();
