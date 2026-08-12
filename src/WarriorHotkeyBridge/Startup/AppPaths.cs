@@ -57,9 +57,24 @@ internal sealed class AppPaths
             Environment.SpecialFolder.LocalApplicationData,
             Environment.SpecialFolderOption.DoNotVerify);
 
-        var paths = new AppPaths(
-            root: Path.Combine(localAppData, ProductFolderName),
-            installDirectory: AppContext.BaseDirectory);
+        return CreateAndEnsure(Path.Combine(localAppData, ProductFolderName));
+    }
+
+    /// <summary>
+    /// Resolves the paths beneath an explicit root and creates the directories.
+    /// </summary>
+    /// <remarks>
+    /// Exists so tests can operate on a temporary directory. The parameterless overload resolves
+    /// the root through <see cref="Environment.GetFolderPath(Environment.SpecialFolder)"/>, which
+    /// asks the Windows shell and deliberately ignores the LOCALAPPDATA environment variable - so
+    /// a test that redirected that variable would silently keep operating on the real profile, and
+    /// anything it wrote would land in the operator's live configuration.
+    /// </remarks>
+    public static AppPaths CreateAndEnsure(string root)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+
+        var paths = new AppPaths(root, installDirectory: AppContext.BaseDirectory);
 
         Directory.CreateDirectory(paths.Logs);
         Directory.CreateDirectory(paths.Configuration);

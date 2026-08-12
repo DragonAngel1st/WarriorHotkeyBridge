@@ -1,5 +1,7 @@
 # Warrior Hotkey Bridge
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A resident Windows tray application that receives **global keyboard hotkeys** (from a Soomfon
 Stream Deck, or any device that can send F13–F24) and routes them directly into the **Warrior
 Trading SIM** web application running in Google Chrome — over the Chrome DevTools Protocol,
@@ -346,8 +348,18 @@ Edit the **user** configuration file — not the one next to the executable:
 %LOCALAPPDATA%\WarriorHotkeyBridge\Configuration\appsettings.json
 ```
 
-It does not exist by default; create it with just the sections you want to override. It is
-layered on top of the shipped `appsettings.json`, which is what allows an MSI upgrade to
+The first run writes this file for you, as a commented template explaining the format with
+examples to copy. **Nothing in it is active**: the examples sit outside the `Bindings` object, so
+the file as written changes no behaviour and no keystroke can be delivered until you deliberately
+move one in. It is written once and never touched again — from the moment it exists it is yours,
+and an application that edited a file holding live trading bindings would not be one worth
+trusting.
+
+That inertness is enforced by tests rather than by intention, because the file is created
+automatically inside an application that can place trades: a future edit that made one of its
+examples live would ship a working buy binding to everyone who installs the product.
+
+It is layered on top of the shipped `appsettings.json`, which is what allows an MSI upgrade to
 replace the defaults without ever discarding your mappings.
 
 ```json

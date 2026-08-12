@@ -175,6 +175,7 @@ internal static class Program
 
         AppPaths paths;
         IConfigurationRoot configuration;
+        bool starterConfigurationWritten = false;
 
         // Bootstrap is guarded separately because none of it can be logged: Log.Logger is still
         // Serilog's silent no-op logger until the last line of this block. Every step here can
@@ -187,6 +188,13 @@ internal static class Program
         try
         {
             paths = AppPaths.CreateAndEnsure();
+
+            // Before the configuration is built, so a first run loads the file it just wrote and
+            // the operator can see it take effect rather than having to restart. Safe to load
+            // because every binding in the template is an example held outside the Bindings
+            // object: as written the file changes nothing.
+            starterConfigurationWritten = StarterConfiguration.TryWrite(paths);
+
             configuration = BuildConfiguration(paths, cli);
             LogOptions logOptions = configuration.GetSection(LogOptions.SectionName).Get<LogOptions>() ?? new LogOptions();
             Log.Logger = LoggingSetup.Create(logOptions, paths, cli.Debug);
@@ -206,6 +214,15 @@ internal static class Program
             Log.Information("Log directory: {LogDirectory}", paths.Logs);
             Log.Debug("User configuration file: {UserConfig} (exists: {Exists})",
                 paths.UserConfigFile, File.Exists(paths.UserConfigFile));
+
+            if (starterConfigurationWritten)
+            {
+                Log.Information(
+                    "First run: wrote a commented example configuration to {UserConfig}. "
+                    + "Nothing in it is active yet - it explains the format and lists examples to copy "
+                    + "into the Bindings section. F23 (Test) and F24 (Diagnostics) work now and send nothing.",
+                    paths.UserConfigFile);
+            }
 
             if (cli.Debug && !consoleAvailable)
             {
