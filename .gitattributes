@@ -1,0 +1,19 @@
+# Normalise line endings so a clone on any machine produces an identical working tree.
+# Without this, contributors on different platforms generate diffs that are entirely whitespace.
+* text=auto
+
+# Windows-only tooling that must keep CRLF regardless of platform: cmd and PowerShell scripts
+# can misbehave with LF endings, and the WiX authoring is only ever built on Windows.
+*.ps1   text eol=crlf
+*.psm1  text eol=crlf
+*.cmd   text eol=crlf
+*.bat   text eol=crlf
+*.wxs   text eol=crlf
+*.wxi   text eol=crlf
+
+# Binary, so git never tries to merge or convert them.
+*.png   binary
+*.ico   binary
+*.msi   binary
+*.pfx   binary
+*.snk   binary
