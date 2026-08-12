@@ -1,0 +1,352 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<!--
+  Warrior Hotkey Bridge - per-user MSI.
+
+  Built by installer/Build-Installer.ps1, which supplies ProductVersion and PublishDir.
+  Authored against the WiX v4 schema namespace, which is shared unchanged by WiX v4, v5, v6
+  and v7 - so this file compiles on any of them. The build pins v5.0.2 because v6 and v7
+  require accepting the Open Source Maintenance Fee EULA and v5 does not.
+-->
+
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <!--
+    Scope="perUser" is a requirement, not a preference. The bridge registers global hotkeys for
+    one interactive session, writes its configuration and logs under %LOCALAPPDATA%, and starts
+    with Windows through HKCU\...\Run. Every one of those is per-user state, so a per-machine
+    install would put the binaries somewhere a second user could run them while all the state
+    they depend on stayed with the first. Installing per-user also means no UAC prompt.
+  -->
+  <Package
+      Name="Warrior Hotkey Bridge"
+      Manufacturer="Patrick Miron"
+      Version="$(var.ProductVersion)"
+      UpgradeCode="5D55C5D4-7B52-42AF-9CE4-7819B8DEF9DE"
+      Scope="perUser"
+      Compressed="yes"
+      InstallerVersion="500"
+      Language="1033">
+
+    <!--
+      Schedule="afterInstallValidate" removes the previous version BEFORE the new files are
+      copied. This is a deliberate choice between two real failure modes, and it is not the one a
+      review picks on first reading - so the reasoning is recorded here rather than rediscovered.
+
+      Removing LAST is the rollback-safe ordering. The old product stays registered until the new
+      files are down, so a copy that fails partway can be rolled back to a working installation
+      instead of leaving the machine with no executable and no Add/Remove Programs entry. That
+      argument is correct as far as it goes, and this package was built that way for a while.
+
+      It is nonetheless the wrong choice here, because of how Windows Installer decides whether to
+      copy a file at all. For a VERSIONED file - which every managed assembly is - the decision
+      compares file versions, never contents. With the old files still present, a
+      WarriorHotkeyBridge.dll carrying 1.0.0.0 does not replace a WarriorHotkeyBridge.dll carrying
+      1.0.0.0, so the installer copies nothing and reports success. Measured rather than reasoned
+      about: an install that returned exit code 0 left a managed assembly nine hours stale, and the
+      feature it was meant to deliver was simply absent from the running process. File hashes do
+      not rescue this; MSI consults them only for unversioned files.
+
+      So the two orderings each guarantee one property and forfeit the other. Remove-last keeps a
+      recoverable installation at every instant but cannot promise the new files are written.
+      Remove-first guarantees the files are written - the destination is empty, so there is
+      nothing to compare against - but has a window where neither version is present.
+
+      Remove-first wins because of how the two fail. A failed upgrade is rare, immediately
+      visible, and repaired by running the installer again. A skipped copy is silent, reports
+      success, and leaves the operator running code they believe was replaced. For an application
+      that places trades, that is not an acceptable failure mode.
+
+      The residual risk is real and worth stating plainly: if the copy fails after the old product
+      has gone, the machine is left with neither version until the installer is run again.
+
+      The way to have both properties is to make every build carry a distinct FILE version, so
+      remove-last can compare versions meaningfully. That is a build-stamping change, not an
+      installer one, and it is deliberately not done here: a scheme that silently degrades to this
+      same bug the first time someone forgets to bump a number is worse than an ordering that
+      cannot degrade at all.
+
+      None of this touches %LOCALAPPDATA%\WarriorHotkeyBridge. Configuration, logs, the startup
+      preference and the Chrome profile are not MSI-managed resources, so the removal step leaves
+      them alone and they are still there when the new version starts.
+    -->
+
+    <!--
+      AllowSameVersionUpgrades is not optional here, despite what its name suggests.
+
+      Without it the upgrade range stops just short of the current version, so installing 1.0.0
+      over an existing 1.0.0 is not recognised as an upgrade at all - Windows Installer treats
+      the rebuilt package as an unrelated product and installs it alongside, leaving two entries
+      in Add/Remove Programs that share one directory. Reinstalling the same version to repair a
+      bad install is an ordinary thing to do, and a rebuild always carries a fresh ProductCode,
+      so this is reachable in normal use rather than only in testing.
+
+      It is also what makes the pre-install stop reliable: an unrecognised install sets neither
+      Installed nor WIX_UPGRADE_DETECTED, so anything conditioned on those would be skipped
+      while a running instance still held its files.
+    -->
+    <MajorUpgrade
+        AllowSameVersionUpgrades="yes"
+        Schedule="afterInstallValidate"
+        DowngradeErrorMessage="A newer version of [ProductName] is already installed. Uninstall it first if you want to go back to this version." />
+
+    <!--
+      EmbedCab keeps the product a single .msi file. The payload is ~210 MB, almost half of it
+      the Node runtime that Playwright's .NET client drives the browser through, so high
+      compression is worth the extra build time.
+    -->
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- No system restore point for a per-user tray utility that writes nothing outside HKCU. -->
+    <Property Id="MSIFASTINSTALL" Value="1" />
+
+    <!--
+      This installer must never restart the machine, under any circumstances.
+
+      It writes nothing outside the user's own profile and touches no system file, so a reboot
+      could never be legitimately required - the only way one gets requested is a file left in
+      use, and the honest response to that is to fail visibly and let the operator retry. A
+      silent install that hits a locked file will otherwise restart Windows on its own, which for
+      a tool used during market hours is a far worse outcome than a failed install. Observed
+      exactly once, the hard way: msiexec returned 1641 and took the machine down with it.
+    -->
+    <Property Id="REBOOT" Value="ReallySuppress" />
+
+    <!-- There is nothing to reconfigure; the tray icon and appsettings.json are the controls. -->
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/" />
+
+    <Feature Id="Main" Title="Warrior Hotkey Bridge" Level="1">
+      <ComponentGroupRef Id="ProductFiles" />
+      <ComponentGroupRef Id="ProductShortcuts" />
+      <ComponentGroupRef Id="DeckShortcuts" />
+    </Feature>
+
+    <!--
+      %LOCALAPPDATA%\Programs is where per-user applications belong on modern Windows; it is
+      what a per-user Chrome, VS Code or Teams install uses. Program Files is not writable
+      without elevation, which is the whole reason a per-user install exists.
+    -->
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="WarriorHotkeyBridge" />
+      </Directory>
+
+      <!--
+        The operator's data folder. The installer creates nothing in it except the Deck
+        subdirectory below - configuration, logs, the startup preference and the Chrome profile
+        are all written by the application and must survive uninstall, so they are deliberately
+        not MSI resources.
+      -->
+      <Directory Id="UserDataFolder" Name="WarriorHotkeyBridge">
+        <Directory Id="DECKFOLDER" Name="Deck" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ShortcutFolder" Name="Warrior Hotkey Bridge" />
+    </StandardDirectory>
+
+    <!--
+      Harvested from the publish output rather than listed by hand. A self-contained .NET
+      publish is hundreds of files that change with every SDK update; enumerating them here
+      would guarantee an installer that silently ships an incomplete runtime one day.
+    -->
+    <ComponentGroup Id="ProductFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.PublishDir)\**" />
+    </ComponentGroup>
+
+    <!--
+      Shortcuts for a Stream Deck to launch.
+
+      They exist separately from the Start Menu entries for two reasons. They pass the silent
+      switch, because a deck button that is pressed twice must not raise an "already running"
+      dialog - pressing an already-pressed button is a normal thing to do, and the right answer
+      is to carry on quietly. And they live at a path the operator binds once: deck software
+      stores the path it was given, so the files have to reappear at exactly the same place after
+      every upgrade or the buttons quietly stop working.
+
+      That path is under the operator's data folder rather than the install folder. Both are
+      stable, but this one reads as belonging to them, and it keeps the deck bindings away from
+      the directory whose entire contents are replaced on upgrade.
+    -->
+    <ComponentGroup Id="DeckShortcuts">
+      <Component Id="StreamDeckShortcuts" Directory="DECKFOLDER" Guid="926C2318-0D46-4794-B2B9-21E756114950">
+
+        <Shortcut
+            Id="DeckGoShortcut"
+            Name="Go Trading"
+            Description="Start the hotkey bridge and its Chrome, and claim F13-F24."
+            Target="[INSTALLFOLDER]WarriorHotkeyBridge.exe"
+            Arguments="--silent"
+            WorkingDirectory="INSTALLFOLDER" />
+
+        <Shortcut
+            Id="DeckStopShortcut"
+            Name="Stop Trading"
+            Description="Stop the bridge, release F13-F24 to other applications, and close its Chrome."
+            Target="[INSTALLFOLDER]WarriorHotkeyBridge.exe"
+            Arguments="--quit --close-chrome --silent"
+            WorkingDirectory="INSTALLFOLDER" />
+
+        <!--
+          Removes the Deck directory only. The parent holds configuration, logs and the Chrome
+          profile, none of which this installer created or may delete.
+        -->
+        <RemoveFolder Id="RemoveDeckFolder" Directory="DECKFOLDER" On="uninstall" />
+
+        <RegistryValue
+            Root="HKCU"
+            Key="Software\WarriorHotkeyBridge\Installer"
+            Name="DeckShortcuts"
+            Type="integer"
+            Value="1"
+            KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="ProductShortcuts">
+      <Component Id="StartMenuShortcuts" Directory="ShortcutFolder" Guid="3E0E7913-07DC-4EA2-B883-0382D83C6212">
+
+        <Shortcut
+            Id="LaunchShortcut"
+            Name="Warrior Hotkey Bridge"
+            Description="Start the hotkey bridge in the notification area."
+            Target="[INSTALLFOLDER]WarriorHotkeyBridge.exe"
+            WorkingDirectory="INSTALLFOLDER" />
+
+        <Shortcut
+            Id="LaunchDebugShortcut"
+            Name="Warrior Hotkey Bridge (Debug Console)"
+            Description="Start with a diagnostic console window and Debug-level logging."
+            Target="[INSTALLFOLDER]WarriorHotkeyBridge.exe"
+            Arguments="--debug"
+            WorkingDirectory="INSTALLFOLDER" />
+
+        <!--
+          The counterpart to the Stream Deck stop button, for when the deck is not to hand.
+          Closes the dedicated Chrome instance too, which is what releases the hotkeys back to
+          other applications.
+        -->
+        <Shortcut
+            Id="StopShortcut"
+            Name="Stop Warrior Hotkey Bridge"
+            Description="Ask a running bridge to exit and close its Chrome instance."
+            Target="[INSTALLFOLDER]WarriorHotkeyBridge.exe"
+            Arguments="--quit --close-chrome"
+            WorkingDirectory="INSTALLFOLDER" />
+
+        <RemoveFolder Id="RemoveShortcutFolder" Directory="ShortcutFolder" On="uninstall" />
+
+        <!--
+          A per-user component needs an HKCU keypath; a file keypath under a user profile is
+          what ICE38/ICE64 flag and what makes repair unreliable for per-user installs.
+        -->
+        <RegistryValue
+            Root="HKCU"
+            Key="Software\WarriorHotkeyBridge\Installer"
+            Name="Shortcuts"
+            Type="integer"
+            Value="1"
+            KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <!--
+      Stop a running bridge before touching its files.
+
+      Without this an upgrade over a running instance hits MSI's files-in-use path: either a
+      dialog asking the operator to close an application that has no window, or a queued reboot.
+      The quit switch now blocks until the instance has released its single-instance mutex, so
+      when this action returns the executable is genuinely unlocked.
+
+      Return="ignore" because every failure mode here is benign - no previous version, no
+      running instance, or a stop that timed out - and none of them justify failing an install.
+
+      The silent switch matters more than it looks. Without it the executable allocates a console
+      window when there is no terminal to attach to, so an unattended install would put a black
+      window on screen for as long as the stop took, and a stop that timed out would raise a
+      dialog with nobody present to dismiss it.
+    -->
+    <CustomAction
+        Id="StopRunningBridge"
+        Directory="INSTALLFOLDER"
+        ExeCommand="&quot;[INSTALLFOLDER]WarriorHotkeyBridge.exe&quot; --quit --silent"
+        Execute="immediate"
+        Impersonate="yes"
+        Return="ignore" />
+
+    <!--
+      Remove the Run registration on uninstall by asking the application to do it.
+
+      The MSI deliberately does not declare that registry value as a resource. An MSI owns what
+      it installs, so a declared Run value would be rewritten by every repair and every upgrade,
+      overriding an operator who had switched startup off - the opposite of "upgrades preserve
+      preferences". Ownership stays with the application; the uninstaller just asks it to clean up.
+
+      Scheduled before RemoveFiles because it runs the very executable that is about to be
+      deleted, and conditioned so it fires on a real uninstall only: during a major upgrade the
+      old product is removed with UPGRADINGPRODUCTCODE set, and clearing startup there would
+      silently disable it for anyone who had it on.
+    -->
+    <CustomAction
+        Id="RemoveStartupRegistration"
+        Directory="INSTALLFOLDER"
+        ExeCommand="&quot;[INSTALLFOLDER]WarriorHotkeyBridge.exe&quot; --uninstall-cleanup --silent"
+        Execute="immediate"
+        Impersonate="yes"
+        Return="ignore" />
+
+    <!--
+      Start the bridge once installation finishes.
+
+      Without this the installer completes silently and nothing is running: no tray icon, no
+      registered hotkeys, and no obvious signal that anything was installed at all. For a
+      resident tray application with no main window that reads as a failed install, and for this
+      one in particular the failure is invisible in the worst way - the keys simply do nothing.
+
+      asyncNoWait because the process is meant to outlive the installer. Anything else would
+      leave msiexec waiting for a tray application that only exits when the operator says so.
+    -->
+    <CustomAction
+        Id="LaunchBridge"
+        Directory="INSTALLFOLDER"
+        ExeCommand="&quot;[INSTALLFOLDER]WarriorHotkeyBridge.exe&quot;"
+        Execute="immediate"
+        Impersonate="yes"
+        Return="asyncNoWait" />
+
+    <InstallExecuteSequence>
+      <!--
+        Before InstallValidate, which is where MSI decides whether files are in use.
+
+        Deliberately unconditional. An earlier version ran this only when Installed or
+        WIX_UPGRADE_DETECTED was set, which sounds like a safe narrowing and is not: those are
+        exactly the properties that are unset when a package is not recognised as an upgrade, so
+        the one case that most needs a running instance stopped was the one case that skipped
+        stopping it. On a genuine first install there is simply no executable at that path yet,
+        the action fails to start anything, and Return="ignore" absorbs it.
+      -->
+      <Custom Action="StopRunningBridge" Before="InstallValidate" />
+
+      <Custom Action="RemoveStartupRegistration" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+
+      <!--
+        Everything except an uninstall. The pairing with StopRunningBridge is the whole point:
+        that action runs unconditionally and stops whatever was running, so anything narrower
+        here leaves a case where the bridge is stopped and never comes back. "NOT Installed"
+        looked sufficient and was not - reinstalling the same package is a maintenance install of
+        a ProductCode that is already present, so Installed is true, and the bridge was stopped
+        and left down.
+
+        The cost of being this broad is that repairing an installation starts the bridge even if
+        it was not running beforehand. That is a fair trade: the operator has just deliberately
+        run an installer, a tray application appearing is unsurprising and one menu click to
+        undo, whereas the failure it prevents is silently dead trading hotkeys discovered at the
+        worst possible moment.
+      -->
+      <Custom Action="LaunchBridge" After="InstallFinalize" Condition="NOT REMOVE=&quot;ALL&quot;" />
+    </InstallExecuteSequence>
+
+  </Package>
+</Wix>

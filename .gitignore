@@ -1,0 +1,48 @@
+# Build output
+artifacts/
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+
+# Rider / VS / VS Code
+.idea/
+.vs/
+*.userprefs
+
+# NuGet
+*.nupkg
+packages/
+
+# Test results
+TestResults/
+*.trx
+coverage*.xml
+coverage*.json
+
+# WiX (Phase 10)
+*.wixpdb
+*.wixobj
+
+# Local machine overrides that must never be committed
+appsettings.Local.json
+
+# Backups made when editing a live user configuration
+*.bak
+*.bak-*
+
+# Credentials and signing material. Nothing here is used by the build - these patterns exist
+# so that an accidental copy into the working tree cannot be committed to a public repository.
+*.pfx
+*.snk
+*.p12
+*.pem
+*.key
+id_rsa*
+*_deploy_key*
+.git-credentials
+secrets.json
+.env
+.env.*
