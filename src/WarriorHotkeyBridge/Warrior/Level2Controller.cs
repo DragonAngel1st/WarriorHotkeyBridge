@@ -94,6 +94,8 @@ internal sealed class Level2Controller : ILevel2Controller
             // Only run when a click is actually going to happen: getBoundingClientRect forces a
             // layout reflow, and the already-selected path must stay free of that.
             let clickTargetOnTop = null;
+            let blockedBy = null;
+            let blockedByDialog = false;
 
             if (!(tabSelected && tabsetActive) && tabBar !== null) {
               const clickEl = contentChild || el;
@@ -106,8 +108,37 @@ internal sealed class Level2Controller : ILevel2Controller
                 // it. Anything else means an overlay covers the tab - a dialog, a dropdown - and
                 // a forced click there would hit the overlay instead.
                 clickTargetOnTop = top !== null && (top === el || el.contains(top));
+
+                // Identify the obstruction while we are already here. Without it the failure
+                // surfaces as Playwright's retry transcript, which says an element intercepts
+                // pointer events but not that the operator simply has a dialog open.
+                if (clickTargetOnTop === false && top !== null) {
+                  const firstClass = (typeof top.className === 'string' && top.className)
+                    ? '.' + top.className.split(/\s+/)[0]
+                    : '';
+
+                  blockedBy = (top.tagName || '?').toLowerCase() + firstClass;
+
+                  // Walk up looking for a modal ancestor. The topmost element is usually an inert
+                  // backdrop or layout div; what matters to the operator is whether a dialog is
+                  // what put it there.
+                  let node = top;
+
+                  for (let depth = 0; depth < 10 && node; depth++) {
+                    const role = node.getAttribute ? node.getAttribute('role') : null;
+                    const cls = typeof node.className === 'string' ? node.className : '';
+
+                    if (role === 'dialog' || role === 'alertdialog' || /dialog|modal/i.test(cls)) {
+                      blockedByDialog = true;
+                      break;
+                    }
+
+                    node = node.parentElement;
+                  }
+                }
               } else {
                 clickTargetOnTop = false;      // zero-sized: scrolled out of the tab strip
+                blockedBy = 'the tab is not visible in the tab strip';
               }
             }
 
@@ -125,6 +156,8 @@ internal sealed class Level2Controller : ILevel2Controller
               // whether the tab has an inner label element to aim at.
               hasContentChild: contentChild !== null,
               clickTargetOnTop,
+              blockedBy,
+              blockedByDialog,
             };
           }
 
@@ -194,6 +227,8 @@ internal sealed class Level2Controller : ILevel2Controller
                     HasTabBar = probe.HasTabBar,
                     HasContentChild = probe.HasContentChild,
                     ClickTargetOnTop = probe.ClickTargetOnTop,
+                    BlockedBy = probe.BlockedBy,
+                    BlockedByDialog = probe.BlockedByDialog,
                     IsSelected = isSelected,
                 };
 
@@ -265,6 +300,12 @@ internal sealed class Level2Controller : ILevel2Controller
         public bool HasContentChild { get; set; }
 
         public bool? ClickTargetOnTop { get; set; }
+
+        /// <summary>Short identity of whatever is covering the tab, when something is.</summary>
+        public string? BlockedBy { get; set; }
+
+        /// <summary>True when the obstruction sits inside a modal dialog.</summary>
+        public bool BlockedByDialog { get; set; }
     }
 
     /// <summary>Counts what every configured selector matches, in one round trip.</summary>
@@ -326,6 +367,38 @@ internal sealed class Level2Controller : ILevel2Controller
         public string? Error { get; set; }
     }
 
+    /// <summary>
+    /// Explains a failed tab selection in terms the operator can act on.
+    /// </summary>
+    /// <remarks>
+    /// Playwright's exception message is its full retry transcript - dozens of lines of "waiting
+    /// for element to be visible, enabled and stable" ending in a CSS selector that intercepted
+    /// pointer events. It is precise and it is unreadable, and it buries the one fact that
+    /// matters: a dialog is open in the SIM and the operator needs to close it. The probe already
+    /// determined what was covering the tab, so the useful answer is available without
+    /// interpreting the transcript at all.
+    /// </remarks>
+    private static string DescribeSelectionFailure(Level2Result located, Exception ex)
+    {
+        if (located.BlockedByDialog)
+        {
+            return "A dialog is open in Warrior SIM and is covering the Level 2 tab, so it could "
+                + "not be selected. Close the dialog and press the key again. Nothing was sent.";
+        }
+
+        if (located.ClickTargetOnTop == false && located.BlockedBy is { } blocker)
+        {
+            return $"Something is covering the Level 2 tab ({blocker}), so it could not be "
+                + "selected. Close whatever is over it and press the key again. Nothing was sent.";
+        }
+
+        // Unrecognised failure: keep Playwright's first line, which names the actual error, and
+        // drop the retry transcript that follows it.
+        string first = ex.Message.Split('\n', 2)[0].Trim();
+
+        return $"Could not select the Level 2 tab: {first}";
+    }
+
     public async Task<Level2Result> EnsureSelectedAsync(IPage page, int index, CancellationToken cancellationToken)
     {
         Level2Result located = await LocateAsync(page, index, cancellationToken).ConfigureAwait(false);
@@ -384,7 +457,7 @@ internal sealed class Level2Controller : ILevel2Controller
             return located with
             {
                 Status = Level2Status.Found,
-                Reason = $"Could not select the Level 2 tab: {ex.Message}",
+                Reason = DescribeSelectionFailure(located, ex),
             };
         }
 

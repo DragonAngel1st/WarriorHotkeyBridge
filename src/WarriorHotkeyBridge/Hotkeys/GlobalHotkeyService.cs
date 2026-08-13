@@ -29,6 +29,7 @@ internal sealed class GlobalHotkeyService : IGlobalHotkeyService, IDisposable
 
     private HotkeyWindow? _window;
     private int _dispatchSuppressionDepth;
+    private Action<HotkeyGesture>? _captureHandler;
     private bool _disposed;
 
     public GlobalHotkeyService(
@@ -98,6 +99,14 @@ internal sealed class GlobalHotkeyService : IGlobalHotkeyService, IDisposable
                     && PlaywrightKeys.DescribeAmbiguity(keys) is { } warning)
                 {
                     _logger.HotkeyKeyExpressionAmbiguous(warning);
+                }
+
+                // Logged as well as shown in the editor, because a configuration file can be
+                // hand-edited and this particular mistake makes a character untypable machine-wide
+                // until someone works out why.
+                if (binding.Gesture.DescribeGlobalCaptureRisk() is { } risk)
+                {
+                    _logger.HotkeyCapturesPrintableKey(risk);
                 }
             }
             else
@@ -292,6 +301,57 @@ internal sealed class GlobalHotkeyService : IGlobalHotkeyService, IDisposable
         return new DispatchSuppression(this);
     }
 
+    /// <summary>
+    /// Suppresses dispatch and reports which registered gesture was pressed, for the editor.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Capturing a Stream Deck key needs this because a registered hotkey never reaches the
+    /// focused window: Windows delivers WM_HOTKEY to whoever registered it, so a dialog waiting on
+    /// ordinary keyboard input sees nothing at all for exactly the keys the operator most wants to
+    /// record.
+    /// </para>
+    /// <para>
+    /// Nothing extra is registered to make this work, which is the point. Keys this process
+    /// already holds arrive here as WM_HOTKEY and are forwarded; keys it does not hold were never
+    /// intercepted and reach the dialog as normal input. Between them the two paths cover
+    /// everything, with no window in which a hotkey is unregistered and available for another
+    /// application to take - the flapping hazard that rules out unregister-and-re-register.
+    /// </para>
+    /// <para>
+    /// The limitation is honest and worth stating: a key held by a THIRD application is
+    /// intercepted by that application, so neither path sees it. The editor says so rather than
+    /// leaving the operator pressing a key that produces nothing.
+    /// </para>
+    /// </remarks>
+    public IDisposable CaptureRegisteredPresses(Action<HotkeyGesture> onPressed)
+    {
+        ArgumentNullException.ThrowIfNull(onPressed);
+        EnsureUiThread();
+
+        _captureHandler = onPressed;
+        IDisposable suppression = SuppressDispatch();
+
+        return new CaptureScope(this, suppression);
+    }
+
+    private sealed class CaptureScope(GlobalHotkeyService owner, IDisposable suppression) : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            owner._captureHandler = null;
+            suppression.Dispose();
+        }
+    }
+
     private void EndSuppression()
     {
         if (_dispatchSuppressionDepth > 0)
@@ -342,10 +402,16 @@ internal sealed class GlobalHotkeyService : IGlobalHotkeyService, IDisposable
         // explainable afterwards.
         if (_dispatchSuppressionDepth > 0)
         {
-            _logger.HotkeyPressIgnoredWhileSuppressed(
-                _byId.TryGetValue(hotkeyId, out HotkeyRegistration? suppressed)
-                    ? suppressed.GestureDisplay
-                    : $"id {hotkeyId}");
+            _byId.TryGetValue(hotkeyId, out HotkeyRegistration? suppressed);
+
+            _logger.HotkeyPressIgnoredWhileSuppressed(suppressed?.GestureDisplay ?? $"id {hotkeyId}");
+
+            // Forwarded only after suppression has already decided nothing will be executed, so a
+            // capture handler can never be the reason a press reaches the command path.
+            if (suppressed is not null)
+            {
+                _captureHandler?.Invoke(suppressed.Gesture);
+            }
 
             return;
         }

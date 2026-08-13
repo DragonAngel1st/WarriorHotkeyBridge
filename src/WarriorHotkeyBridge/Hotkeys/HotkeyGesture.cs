@@ -92,6 +92,48 @@ internal readonly record struct HotkeyGesture(HotkeyModifiers Modifiers, Keys Ke
     public uint VirtualKeyCode => (uint)(Key & Keys.KeyCode);
 
     /// <summary>
+    /// Warns when this gesture would take a key the operator still needs for typing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A global hotkey is captured by this process everywhere, in every application. That is
+    /// exactly right for F13-F24, which no physical keyboard has - and disastrous for a bare
+    /// letter or digit, because from then on that character cannot be typed anywhere on the
+    /// machine, and every attempt to type it fires the binding instead. On a trading binding that
+    /// means an order per keystroke.
+    /// </para>
+    /// <para>
+    /// Not an error, because it is legal and Windows will do it. But it is never what someone
+    /// setting up a Stream Deck meant, and it is invisible until they try to type.
+    /// </para>
+    /// </remarks>
+    public string? DescribeGlobalCaptureRisk()
+    {
+        if (Modifiers is not HotkeyModifiers.None)
+        {
+            return null;
+        }
+
+        Keys key = Key & Keys.KeyCode;
+
+        bool printable = key is >= Keys.A and <= Keys.Z
+            or >= Keys.D0 and <= Keys.D9
+            or >= Keys.NumPad0 and <= Keys.NumPad9
+            or Keys.Space or Keys.OemSemicolon or Keys.Oemplus or Keys.Oemcomma
+            or Keys.OemMinus or Keys.OemPeriod or Keys.OemQuestion or Keys.Oemtilde
+            or Keys.OemOpenBrackets or Keys.OemPipe or Keys.OemCloseBrackets or Keys.OemQuotes;
+
+        if (!printable)
+        {
+            return null;
+        }
+
+        return $"'{Display}' takes the {Display} key globally, in every application. You will not "
+            + "be able to type it anywhere while the bridge is running, and every press fires this "
+            + "binding. Add a modifier (Ctrl+Alt+" + Display + ") or use a Stream Deck key such as F13.";
+    }
+
+    /// <summary>
     /// Parses a gesture such as <c>"F13"</c>, <c>"Ctrl+Alt+F13"</c> or <c>"ctrl + shift + 1"</c>.
     /// </summary>
     /// <returns>True on success; otherwise <paramref name="error"/> explains why.</returns>

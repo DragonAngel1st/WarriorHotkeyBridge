@@ -80,6 +80,9 @@ internal static partial class BridgeLog
     [LoggerMessage(EventId = 219, Level = LogLevel.Warning, Message = "[HOTKEY] {Gesture} pressed while capturing; ignored rather than executed.")]
     public static partial void HotkeyPressIgnoredWhileSuppressed(this ILogger logger, string gesture);
 
+    [LoggerMessage(EventId = 220, Level = LogLevel.Warning, Message = "[HOTKEY] {Risk}")]
+    public static partial void HotkeyCapturesPrintableKey(this ILogger logger, string risk);
+
     [LoggerMessage(EventId = 211, Level = LogLevel.Information, Message = "[STARTUP] Updated from {PreviousVersion} to {CurrentVersion} with Start with Windows off; asking whether to re-enable it.")]
     public static partial void StartupOfferingAfterUpdate(this ILogger logger, string previousVersion, string currentVersion);
 

@@ -33,17 +33,21 @@ internal sealed class HotkeyEditorForm : Form
     private Label _help = null!;
     private Button _saveAsPreset = null!;
     private Button _capture = null!;
+    private Button _captureHotkey = null!;
     private readonly Func<IDisposable>? _suppressDispatch;
+    private readonly Func<Action<HotkeyGesture>, IDisposable>? _captureRegisteredPresses;
 
     private bool _suppressValidation;
 
     public HotkeyEditorForm(
         IReadOnlyDictionary<string, HotkeyBindingConfig> current,
         IHotkeyPresetProvider presets,
-        Func<IDisposable>? suppressDispatch = null)
+        Func<IDisposable>? suppressDispatch = null,
+        Func<Action<HotkeyGesture>, IDisposable>? captureRegisteredPresses = null)
     {
         ArgumentNullException.ThrowIfNull(current);
         _presets = presets;
+        _captureRegisteredPresses = captureRegisteredPresses;
 
         // Optional so the form stays constructible in tests without a hotkey service. In the
         // application it is always supplied - see the guard in OnCaptureKey, which refuses to
@@ -52,8 +56,8 @@ internal sealed class HotkeyEditorForm : Form
 
         Text = $"{AppInfo.ProductName} - Hotkeys";
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(760, 460);
-        Size = new Size(900, 560);
+        MinimumSize = new Size(820, 480);
+        Size = new Size(1040, 600);
         ShowInTaskbar = true;
         MinimizeBox = false;
 
@@ -100,7 +104,10 @@ internal sealed class HotkeyEditorForm : Form
         _saveAsPreset = new Button { Text = "Save as preset...", AutoSize = true, Margin = new Padding(6, 0, 0, 0) };
         _saveAsPreset.Click += OnSaveAsPreset;
 
-        _capture = new Button { Text = "Capture key...", AutoSize = true, Margin = new Padding(18, 0, 0, 0) };
+        _captureHotkey = new Button { Text = "Capture hotkey...", AutoSize = true, Margin = new Padding(18, 0, 0, 0) };
+        _captureHotkey.Click += OnCaptureHotkey;
+
+        _capture = new Button { Text = "Capture sends...", AutoSize = true, Margin = new Padding(6, 0, 0, 0) };
         _capture.Click += OnCaptureKey;
 
         var addRow = new Button { Text = "Add row", AutoSize = true, Margin = new Padding(18, 0, 0, 0) };
@@ -109,12 +116,16 @@ internal sealed class HotkeyEditorForm : Form
         var removeRow = new Button { Text = "Remove row", AutoSize = true, Margin = new Padding(6, 0, 0, 0) };
         removeRow.Click += OnRemoveRow;
 
+        // Wrapping ON here, unlike the OK/Cancel panel. That one had to stay on one line because a
+        // stacked Save-above-Cancel looks broken; a toolbar spilling onto a second row is ordinary,
+        // and the alternative is what happened when a sixth button was added - Remove row simply
+        // vanished past the right edge with nothing to indicate it existed.
         var toolbar = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            WrapContents = false,
+            WrapContents = true,
             Margin = new Padding(0, 0, 0, 8),
         };
 
@@ -124,6 +135,7 @@ internal sealed class HotkeyEditorForm : Form
             _presetPicker,
             loadPreset,
             _saveAsPreset,
+            _captureHotkey,
             _capture,
             addRow,
             removeRow,
@@ -501,6 +513,58 @@ internal sealed class HotkeyEditorForm : Form
         Revalidate();
     }
 
+    /// <summary>
+    /// Records the deck key for the selected row, from either delivery path.
+    /// </summary>
+    /// <remarks>
+    /// Two paths, because Windows splits them. A key this process already holds is delivered as
+    /// WM_HOTKEY to the bridge's own window and never reaches this dialog, so the bridge forwards
+    /// it. A key it does not hold was never intercepted and arrives as ordinary input the dialog
+    /// reads itself. Neither alone is sufficient: the first misses unbound keys, the second misses
+    /// exactly the keys already configured.
+    /// </remarks>
+    private void OnCaptureHotkey(object? sender, EventArgs e)
+    {
+        _grid.EndEdit();
+
+        if (_grid.CurrentRow is not { Index: >= 0 and var index } || index >= _rows.Count)
+        {
+            MessageBox.Show(this, "Select a row first.", "Capture hotkey", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        if (_captureRegisteredPresses is null)
+        {
+            MessageBox.Show(
+                this,
+                "Capture is unavailable because hotkey dispatch cannot be suspended. Type the key "
+                + "instead, for example F13 or Ctrl+Alt+F13.",
+                "Capture hotkey",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+
+            return;
+        }
+
+        BindingRow row = _rows[index];
+        string? captured;
+
+        using (var dialog = new KeyCaptureDialog(row.Hotkey, hotkeyMode: true))
+        using (_captureRegisteredPresses(dialog.AcceptCapturedGesture))
+        {
+            captured = dialog.ShowDialog(this) is DialogResult.OK ? dialog.CapturedExpression : null;
+        }
+
+        if (captured is null)
+        {
+            return;
+        }
+
+        row.Hotkey = captured;
+        _rows.ResetItem(index);
+        Revalidate();
+    }
+
     private void OnAddRow(object? sender, EventArgs e)
     {
         _rows.Add(new BindingRow());
@@ -574,10 +638,16 @@ internal sealed class HotkeyEditorForm : Form
         HotkeyBindingResolution resolution = HotkeyBindingResolver.Resolve(candidate);
         problems.AddRange(resolution.Problems);
 
-        // A warning, not a problem: Shift with a bare digit is legal and delivers a different
-        // character than a physical Shift+number. Worth saying, never worth blocking.
+        // Warnings, not problems: each is legal and will register, so blocking would refuse
+        // something Windows is perfectly willing to do. They stand out from the notes because
+        // one of them - taking a bare letter globally - is a trap nobody chooses on purpose.
         foreach (HotkeyBinding binding in resolution.Bindings)
         {
+            if (binding.Gesture.DescribeGlobalCaptureRisk() is { } risk)
+            {
+                problems.Add("Warning: " + risk);
+            }
+
             if (binding.Action.Keys is { } keys && PlaywrightKeys.DescribeAmbiguity(keys) is { } warning)
             {
                 problems.Add("Note: " + warning);
@@ -586,11 +656,18 @@ internal sealed class HotkeyEditorForm : Form
 
         _problems.Text = string.Join(Environment.NewLine, problems);
         _problems.Visible = problems.Count > 0;
-        _problems.ForeColor = problems.All(p => p.StartsWith("Note:", StringComparison.Ordinal))
-            ? Color.FromArgb(70, 70, 70)
-            : Color.FromArgb(150, 35, 35);
 
-        bool blocking = problems.Any(p => !p.StartsWith("Note:", StringComparison.Ordinal));
+        bool blocking = problems.Any(p =>
+            !p.StartsWith("Note:", StringComparison.Ordinal)
+            && !p.StartsWith("Warning:", StringComparison.Ordinal));
+
+        // Three levels, because they mean different things: red is "this will not register",
+        // amber is "this registers and you will regret it", grey is "worth knowing".
+        _problems.ForeColor = blocking
+            ? Color.FromArgb(150, 35, 35)
+            : problems.Any(p => p.StartsWith("Warning:", StringComparison.Ordinal))
+                ? Color.FromArgb(150, 90, 0)
+                : Color.FromArgb(70, 70, 70);
 
         _save.Enabled = !blocking && resolution.Bindings.Count > 0;
         _summary.Text = resolution.Bindings.Count switch

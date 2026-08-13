@@ -26,9 +26,12 @@ internal sealed class KeyCaptureDialog : Form
     private readonly Label _explanation;
     private readonly Button _ok;
 
-    public KeyCaptureDialog(string? current)
+    private readonly bool _hotkeyMode;
+
+    public KeyCaptureDialog(string? current, bool hotkeyMode = false)
     {
-        Text = "Capture shortcut";
+        _hotkeyMode = hotkeyMode;
+        Text = hotkeyMode ? "Capture hotkey" : "Capture shortcut";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
@@ -42,9 +45,13 @@ internal sealed class KeyCaptureDialog : Form
             AutoSize = false,
             Dock = DockStyle.Fill,
             UseMnemonic = false,
-            Text = "Press the shortcut that Warrior SIM expects - the keys you would press if you "
-                + "were typing into the SIM yourself.\r\n\r\n"
-                + "Escape closes this without changing anything.",
+            Text = hotkeyMode
+                ? "Press the Stream Deck key you want to use.\r\n\r\n"
+                    + "If nothing appears, another application is holding that key - close it and "
+                    + "try again. Escape closes this without changing anything."
+                : "Press the shortcut that Warrior SIM expects - the keys you would press if you "
+                    + "were typing into the SIM yourself.\r\n\r\n"
+                    + "Escape closes this without changing anything.",
         };
 
         _captured = new Label
@@ -127,6 +134,24 @@ internal sealed class KeyCaptureDialog : Form
             return true;
         }
 
+        // The Hotkey column names a Windows key, not a browser one, so it is parsed rather than
+        // translated. This path serves keys the bridge does NOT currently hold; the ones it does
+        // arrive through AcceptCapturedGesture instead, because Windows never delivers a
+        // registered hotkey to the focused window.
+        if (_hotkeyMode)
+        {
+            if (HotkeyGesture.TryParse(DescribeAsGestureText(keyData), out HotkeyGesture gesture, out string? gestureError))
+            {
+                AcceptCapturedGesture(gesture);
+            }
+            else
+            {
+                ShowRejection(gestureError);
+            }
+
+            return true;
+        }
+
         if (WindowsKeyTranslator.TryTranslate(keyData, out string? expression, out string? error))
         {
             CapturedExpression = expression;
@@ -147,6 +172,75 @@ internal sealed class KeyCaptureDialog : Form
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Accepts a gesture that arrived as WM_HOTKEY rather than as keyboard input.
+    /// </summary>
+    /// <remarks>
+    /// Called by the editor when the bridge forwards a press of a key it already holds. Windows
+    /// delivers a registered hotkey to the registering window, never to the focused one, so
+    /// without this path the dialog would be blind to precisely the F13-F24 keys it exists to
+    /// record.
+    /// </remarks>
+    public void AcceptCapturedGesture(HotkeyGesture gesture)
+    {
+        string text = gesture.Display;
+
+        CapturedExpression = text;
+        _captured.Text = text;
+        _captured.ForeColor = SystemColors.ControlText;
+        _explanation.Text = gesture.DescribeGlobalCaptureRisk() is { } risk
+            ? risk
+            : "Ready to use.";
+
+        _explanation.ForeColor = gesture.DescribeGlobalCaptureRisk() is null
+            ? SystemColors.GrayText
+            : Color.FromArgb(150, 90, 0);
+
+        _ok.Enabled = true;
+    }
+
+    private void ShowRejection(string? error)
+    {
+        CapturedExpression = null;
+        _captured.Text = "cannot be used";
+        _captured.ForeColor = Color.FromArgb(150, 35, 35);
+        _explanation.Text = error;
+        _explanation.ForeColor = Color.FromArgb(150, 35, 35);
+        _ok.Enabled = false;
+    }
+
+    /// <summary>
+    /// Renders a WinForms key as the text the gesture parser reads.
+    /// </summary>
+    /// <remarks>
+    /// Goes through text rather than constructing a gesture directly so capture and a typed value
+    /// travel the same parsing path - including its rejection of modifier-only chords and of keys
+    /// that cannot be registered. Two routes into the same field that disagreed about what is
+    /// valid would be worse than one route.
+    /// </remarks>
+    private static string DescribeAsGestureText(Keys keyData)
+    {
+        List<string> parts = [];
+
+        if (keyData.HasFlag(Keys.Control))
+        {
+            parts.Add("Ctrl");
+        }
+
+        if (keyData.HasFlag(Keys.Alt))
+        {
+            parts.Add("Alt");
+        }
+
+        if (keyData.HasFlag(Keys.Shift))
+        {
+            parts.Add("Shift");
+        }
+
+        parts.Add((keyData & Keys.KeyCode).ToString());
+        return string.Join('+', parts);
     }
 
     /// <summary>Shows the modifiers held so far, so the dialog feels responsive mid-chord.</summary>

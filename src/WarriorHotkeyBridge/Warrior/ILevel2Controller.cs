@@ -51,6 +51,19 @@ internal sealed record Level2Result
     /// </summary>
     public bool? ClickTargetOnTop { get; init; }
 
+    /// <summary>
+    /// Short identity of whatever is covering the tab, e.g. <c>div.MuiDialog-container</c>.
+    /// </summary>
+    /// <remarks>
+    /// Captured by the same probe that performs the hit test, so explaining a blocked click costs
+    /// no extra round trip - and the explanation is available before Playwright has finished
+    /// producing the retry transcript that would otherwise be all the operator saw.
+    /// </remarks>
+    public string? BlockedBy { get; init; }
+
+    /// <summary>True when that obstruction sits inside a modal dialog.</summary>
+    public bool BlockedByDialog { get; init; }
+
     /// <summary>Title of the page the probe ran on. Carried here so a readiness check is one round trip.</summary>
     public string? PageTitle { get; init; }
 
