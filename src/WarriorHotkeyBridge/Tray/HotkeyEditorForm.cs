@@ -32,15 +32,23 @@ internal sealed class HotkeyEditorForm : Form
     private readonly Label _summary;
     private Label _help = null!;
     private Button _saveAsPreset = null!;
+    private Button _capture = null!;
+    private readonly Func<IDisposable>? _suppressDispatch;
 
     private bool _suppressValidation;
 
     public HotkeyEditorForm(
         IReadOnlyDictionary<string, HotkeyBindingConfig> current,
-        IHotkeyPresetProvider presets)
+        IHotkeyPresetProvider presets,
+        Func<IDisposable>? suppressDispatch = null)
     {
         ArgumentNullException.ThrowIfNull(current);
         _presets = presets;
+
+        // Optional so the form stays constructible in tests without a hotkey service. In the
+        // application it is always supplied - see the guard in OnCaptureKey, which refuses to
+        // capture rather than capturing with live keys.
+        _suppressDispatch = suppressDispatch;
 
         Text = $"{AppInfo.ProductName} - Hotkeys";
         StartPosition = FormStartPosition.CenterScreen;
@@ -90,6 +98,9 @@ internal sealed class HotkeyEditorForm : Form
         _saveAsPreset = new Button { Text = "Save as preset...", AutoSize = true, Margin = new Padding(6, 0, 0, 0) };
         _saveAsPreset.Click += OnSaveAsPreset;
 
+        _capture = new Button { Text = "Capture key...", AutoSize = true, Margin = new Padding(18, 0, 0, 0) };
+        _capture.Click += OnCaptureKey;
+
         var addRow = new Button { Text = "Add row", AutoSize = true, Margin = new Padding(18, 0, 0, 0) };
         addRow.Click += OnAddRow;
 
@@ -111,6 +122,7 @@ internal sealed class HotkeyEditorForm : Form
             _presetPicker,
             loadPreset,
             _saveAsPreset,
+            _capture,
             addRow,
             removeRow,
         ]);
@@ -427,6 +439,64 @@ internal sealed class HotkeyEditorForm : Form
             : Math.Max(0, presets.ToList().FindIndex(p => string.Equals(p.Name, select, StringComparison.OrdinalIgnoreCase)));
 
         _presetPicker.SelectedIndex = index;
+    }
+
+    /// <summary>
+    /// Records a shortcut by having the operator press it, and writes it into the selected row.
+    /// </summary>
+    /// <remarks>
+    /// Hotkey dispatch is suppressed for the whole time the capture dialog is open, in a
+    /// <c>using</c> so it is restored even if the dialog throws. Without that, pressing a key in
+    /// order to record it would instead fire whatever that key is bound to - and most rows here
+    /// place orders. If no suppression is available the capture is refused outright rather than
+    /// run unprotected.
+    /// </remarks>
+    private void OnCaptureKey(object? sender, EventArgs e)
+    {
+        _grid.EndEdit();
+
+        if (_grid.CurrentRow is not { Index: >= 0 and var index } || index >= _rows.Count)
+        {
+            MessageBox.Show(this, "Select a row first.", "Capture shortcut", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        if (_suppressDispatch is null)
+        {
+            MessageBox.Show(
+                this,
+                "Capture is unavailable because hotkey dispatch cannot be suspended. Type the "
+                + "shortcut instead.",
+                "Capture shortcut",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+
+            return;
+        }
+
+        BindingRow row = _rows[index];
+        string? captured;
+
+        using (_suppressDispatch())
+        using (var dialog = new KeyCaptureDialog(row.Send))
+        {
+            captured = dialog.ShowDialog(this) is DialogResult.OK ? dialog.CapturedExpression : null;
+        }
+
+        if (captured is null)
+        {
+            return;
+        }
+
+        row.Send = captured;
+
+        // An Action and a Send are mutually exclusive, and the operator has just said which they
+        // want by pressing a key. Clearing the other is less surprising than saving successfully
+        // and then being told the row sets both.
+        row.Action = string.Empty;
+
+        _rows.ResetItem(index);
+        Revalidate();
     }
 
     private void OnAddRow(object? sender, EventArgs e)

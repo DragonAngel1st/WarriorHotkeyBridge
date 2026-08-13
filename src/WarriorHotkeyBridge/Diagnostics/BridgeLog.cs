@@ -71,6 +71,15 @@ internal static partial class BridgeLog
     [LoggerMessage(EventId = 216, Level = LogLevel.Error, Message = "[HOTKEY] Could not save the hotkey configuration; nothing was applied: {Reason}")]
     public static partial void HotkeyConfigurationSaveFailed(this ILogger logger, string reason);
 
+    [LoggerMessage(EventId = 217, Level = LogLevel.Information, Message = "[HOTKEY] Dispatch suppressed while capturing a key; presses will be recorded, not executed.")]
+    public static partial void HotkeyDispatchSuppressed(this ILogger logger);
+
+    [LoggerMessage(EventId = 218, Level = LogLevel.Information, Message = "[HOTKEY] Dispatch resumed.")]
+    public static partial void HotkeyDispatchResumed(this ILogger logger);
+
+    [LoggerMessage(EventId = 219, Level = LogLevel.Warning, Message = "[HOTKEY] {Gesture} pressed while capturing; ignored rather than executed.")]
+    public static partial void HotkeyPressIgnoredWhileSuppressed(this ILogger logger, string gesture);
+
     [LoggerMessage(EventId = 211, Level = LogLevel.Information, Message = "[STARTUP] Updated from {PreviousVersion} to {CurrentVersion} with Start with Windows off; asking whether to re-enable it.")]
     public static partial void StartupOfferingAfterUpdate(this ILogger logger, string previousVersion, string currentVersion);
 

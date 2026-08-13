@@ -28,6 +28,7 @@ internal sealed class GlobalHotkeyService : IGlobalHotkeyService, IDisposable
     private string? _firstConfigurationProblem;
 
     private HotkeyWindow? _window;
+    private int _dispatchSuppressionDepth;
     private bool _disposed;
 
     public GlobalHotkeyService(
@@ -265,10 +266,89 @@ internal sealed class GlobalHotkeyService : IGlobalHotkeyService, IDisposable
     /// Runs on the UI thread inside the window procedure, so it must stay short: any work done
     /// here delays the message loop and therefore every subsequent keypress.
     /// </summary>
-    private void OnHotkeyMessage(object? sender, int hotkeyId)
+    /// <summary>
+    /// Stops hotkey presses being dispatched until the returned token is disposed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For the key-capture dialog. While it is open the operator is pressing keys in order to
+    /// record them, and F13-F24 are still registered globally - so without this, pressing a key to
+    /// capture it would instead fire its binding and place an order. That is the worst failure
+    /// this application could have, so suppression is applied here, at the point the message
+    /// arrives, rather than anywhere downstream that could later be bypassed.
+    /// </para>
+    /// <para>
+    /// A counter rather than a flag, so overlapping scopes cannot end with one of them clearing
+    /// suppression another still needs. A token rather than a property, so it is released by
+    /// <c>using</c> even when the dialog throws.
+    /// </para>
+    /// </remarks>
+    public IDisposable SuppressDispatch()
+    {
+        EnsureUiThread();
+        _dispatchSuppressionDepth++;
+        _logger.HotkeyDispatchSuppressed();
+
+        return new DispatchSuppression(this);
+    }
+
+    private void EndSuppression()
+    {
+        if (_dispatchSuppressionDepth > 0)
+        {
+            _dispatchSuppressionDepth--;
+        }
+
+        if (_dispatchSuppressionDepth == 0)
+        {
+            _logger.HotkeyDispatchResumed();
+        }
+    }
+
+    private sealed class DispatchSuppression(GlobalHotkeyService owner) : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            owner.EndSuppression();
+        }
+    }
+
+    private void OnHotkeyMessage(object? sender, int hotkeyId) => HandleHotkeyMessage(hotkeyId);
+
+    /// <summary>
+    /// Decides what to do with a received hotkey message.
+    /// </summary>
+    /// <remarks>
+    /// Separate from the window event so the suppression rule can be exercised without a real
+    /// Win32 message. That rule is the one preventing a key pressed for capture from placing an
+    /// order, so it needs a test that runs the actual decision rather than one asserting on a
+    /// counter beside it.
+    /// </remarks>
+    internal void HandleHotkeyMessage(int hotkeyId)
     {
         // Captured first so the measured latency includes everything after message receipt.
         long received = Stopwatch.GetTimestamp();
+
+        // Before the lookup and before the event: a suppressed press must not reach anything that
+        // could act on it, and must be visible in the log so a key that "did nothing" is
+        // explainable afterwards.
+        if (_dispatchSuppressionDepth > 0)
+        {
+            _logger.HotkeyPressIgnoredWhileSuppressed(
+                _byId.TryGetValue(hotkeyId, out HotkeyRegistration? suppressed)
+                    ? suppressed.GestureDisplay
+                    : $"id {hotkeyId}");
+
+            return;
+        }
 
         if (!_byId.TryGetValue(hotkeyId, out HotkeyRegistration? registration))
         {
