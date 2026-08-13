@@ -185,19 +185,40 @@ internal sealed class KeyCaptureDialog : Form
     /// </remarks>
     public void AcceptCapturedGesture(HotkeyGesture gesture)
     {
+        if (!_hotkeyMode)
+        {
+            // Sends mode. A chord the bridge has registered as a hotkey never arrives as keyboard
+            // input, so without this it could not be recorded here at all - which bites precisely
+            // when the same chord is wanted on both sides, the natural thing to do when the SIM
+            // shortcut and the deck key are meant to match. Translated through the same path as
+            // ordinary input so the result is identical either way.
+            bool meta = gesture.Modifiers.HasFlag(HotkeyModifiers.Windows);
+
+            if (WindowsKeyTranslator.TryTranslate(gesture.ToWindowsKeyData(), meta, out string? sends, out string? sendsError))
+            {
+                CapturedExpression = sends;
+                _captured.Text = sends;
+                _captured.ForeColor = SystemColors.ControlText;
+                _explanation.Text = WindowsKeyTranslator.Describe(sends);
+                _explanation.ForeColor = SystemColors.GrayText;
+                _ok.Enabled = true;
+            }
+            else
+            {
+                ShowRejection(sendsError);
+            }
+
+            return;
+        }
+
         string text = gesture.Display;
+        string? risk = gesture.DescribeGlobalCaptureRisk();
 
         CapturedExpression = text;
         _captured.Text = text;
         _captured.ForeColor = SystemColors.ControlText;
-        _explanation.Text = gesture.DescribeGlobalCaptureRisk() is { } risk
-            ? risk
-            : "Ready to use.";
-
-        _explanation.ForeColor = gesture.DescribeGlobalCaptureRisk() is null
-            ? SystemColors.GrayText
-            : Color.FromArgb(150, 90, 0);
-
+        _explanation.Text = risk ?? "Ready to use.";
+        _explanation.ForeColor = risk is null ? SystemColors.GrayText : Color.FromArgb(150, 90, 0);
         _ok.Enabled = true;
     }
 

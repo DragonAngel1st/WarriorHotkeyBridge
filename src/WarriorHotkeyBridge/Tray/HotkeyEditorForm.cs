@@ -475,7 +475,7 @@ internal sealed class HotkeyEditorForm : Form
             return;
         }
 
-        if (_suppressDispatch is null)
+        if (_captureRegisteredPresses is null)
         {
             MessageBox.Show(
                 this,
@@ -491,8 +491,12 @@ internal sealed class HotkeyEditorForm : Form
         BindingRow row = _rows[index];
         string? captured;
 
-        using (_suppressDispatch())
+        // Forwarding is needed here as well as in hotkey capture, not just suppression. A chord
+        // already bound as a hotkey is intercepted by this process and never reaches the dialog as
+        // keyboard input, so pressing it here would hang on the modifiers forever - which is
+        // exactly what happens when the deck key and the SIM shortcut are meant to be the same.
         using (var dialog = new KeyCaptureDialog(row.Send))
+        using (_captureRegisteredPresses(dialog.AcceptCapturedGesture))
         {
             captured = dialog.ShowDialog(this) is DialogResult.OK ? dialog.CapturedExpression : null;
         }

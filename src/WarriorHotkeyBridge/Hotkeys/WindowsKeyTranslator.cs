@@ -41,6 +41,18 @@ internal static class WindowsKeyTranslator
     public static bool TryTranslate(
         Keys keyData,
         [NotNullWhen(true)] out string? expression,
+        [NotNullWhen(false)] out string? error) =>
+        TryTranslate(keyData, includeMeta: false, out expression, out error);
+
+    /// <param name="includeMeta">
+    /// True when the Windows key was held. It has no <see cref="Keys"/> modifier flag, so a
+    /// gesture carrying it has to pass that fact alongside.
+    /// </param>
+    /// <inheritdoc cref="TryTranslate(Keys, out string, out string)"/>
+    public static bool TryTranslate(
+        Keys keyData,
+        bool includeMeta,
+        [NotNullWhen(true)] out string? expression,
         [NotNullWhen(false)] out string? error)
     {
         expression = null;
@@ -62,6 +74,11 @@ internal static class WindowsKeyTranslator
 
         // Fixed order regardless of the order they were pressed in, so the same chord always
         // produces the same text and two identical bindings never look different.
+        if (includeMeta)
+        {
+            parts.Add("Meta");
+        }
+
         if (keyData.HasFlag(Keys.Control))
         {
             parts.Add("Control");

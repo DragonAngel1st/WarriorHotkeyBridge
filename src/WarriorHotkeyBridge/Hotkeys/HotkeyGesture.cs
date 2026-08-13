@@ -92,6 +92,37 @@ internal readonly record struct HotkeyGesture(HotkeyModifiers Modifiers, Keys Ke
     public uint VirtualKeyCode => (uint)(Key & Keys.KeyCode);
 
     /// <summary>
+    /// The equivalent WinForms key, modifier flags included.
+    /// </summary>
+    /// <remarks>
+    /// Lets a gesture that arrived as WM_HOTKEY be handed to the same translator that handles
+    /// ordinary keyboard input, so a chord reaches the Sends column identically whether or not
+    /// this process happens to have it registered. The Windows-key modifier has no
+    /// <see cref="Keys"/> flag and is reported separately.
+    /// </remarks>
+    public Keys ToWindowsKeyData()
+    {
+        Keys value = Key & Keys.KeyCode;
+
+        if (Modifiers.HasFlag(HotkeyModifiers.Control))
+        {
+            value |= Keys.Control;
+        }
+
+        if (Modifiers.HasFlag(HotkeyModifiers.Alt))
+        {
+            value |= Keys.Alt;
+        }
+
+        if (Modifiers.HasFlag(HotkeyModifiers.Shift))
+        {
+            value |= Keys.Shift;
+        }
+
+        return value;
+    }
+
+    /// <summary>
     /// Warns when this gesture would take a key the operator still needs for typing.
     /// </summary>
     /// <remarks>
