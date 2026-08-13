@@ -142,7 +142,14 @@ internal readonly record struct HotkeyGesture(HotkeyModifiers Modifiers, Keys Ke
 
         if (!TryParseKey(keyToken, out Keys key))
         {
-            error = $"'{keyToken}' in '{text}' is not a recognised key name.";
+            // Names the two vocabularies explicitly. The columns either side of this value use
+            // different ones - Windows key names here, browser event.code names for what gets
+            // sent - and F13 is spelled the same in both, so nothing on screen reveals the
+            // difference until something is rejected.
+            error = $"'{keyToken}' in '{text}' is not a recognised key name. Use a Windows key "
+                + "name such as F13, D, NumPad5, Up or Escape. Browser names like KeyD, Digit1 "
+                + "and ArrowUp are accepted too, but only where they name a real key.";
+
             return false;
         }
 
@@ -172,6 +179,15 @@ internal readonly record struct HotkeyGesture(HotkeyModifiers Modifiers, Keys Ke
 
         if (!Enum.TryParse(token, ignoreCase: true, out key) || !Enum.IsDefined(key))
         {
+            // Fall back to the browser vocabulary the Sends column uses, so KeyD, Digit1 and
+            // ArrowUp work here as well. Tried second, so the Windows names keep their existing
+            // meaning exactly and nothing that parsed before can change interpretation.
+            if (WindowsKeyTranslator.TryFromBrowserName(token, out Keys aliased))
+            {
+                key = aliased;
+                return true;
+            }
+
             key = Keys.None;
             return false;
         }

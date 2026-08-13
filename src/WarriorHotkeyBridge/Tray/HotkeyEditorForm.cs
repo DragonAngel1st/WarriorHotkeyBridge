@@ -88,8 +88,10 @@ internal sealed class HotkeyEditorForm : Form
             Text =
                 "Each row sends a keyboard shortcut into the Level 2 & Order Entry panel. What that "
                 + "shortcut DOES is set in Warrior SIM's own hotkey settings - this only delivers it. "
-                + "Use Shift+Digit1 rather than Shift+1. Leave the Sends column empty and pick an "
-                + "Action for a key that sends nothing.",
+                + "Leave the Sends column empty and pick an Action for a key that sends nothing.\r\n"
+                + "Hotkey is the key your Stream Deck sends (F13, Ctrl+Alt+D). Sends is the key the "
+                + "browser receives, so a physical Shift+1 is written Shift+Digit1 - select a row and "
+                + "use Capture key rather than typing it.",
         };
 
         var loadPreset = new Button { Text = "Load", AutoSize = true, Margin = new Padding(6, 0, 0, 0) };
@@ -221,7 +223,7 @@ internal sealed class HotkeyEditorForm : Form
         // front of every operator would be advertising the thing we intend to retire. Values
         // already in the configuration file are preserved untouched; the row carries them through.
         grid.Columns.AddRange(
-            TextColumn(nameof(BindingRow.Hotkey), "Hotkey", 110),
+            TextColumn(nameof(BindingRow.Hotkey), "Hotkey (from the deck)", 150),
             TextColumn(nameof(BindingRow.Send), "Sends into Level 2", 180),
             Choice(nameof(BindingRow.Action), "Action", 120, ["", "Test", "Diagnostics"]),
             TextColumn(nameof(BindingRow.Label), "Label (yours - never interpreted)", 300));

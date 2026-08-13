@@ -186,6 +186,64 @@ internal static class WindowsKeyTranslator
     };
 
     /// <summary>
+    /// Resolves a browser key name back to the Windows key it names.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The inverse of <see cref="TryMapKey"/>, and it exists so the Hotkey column can accept
+    /// browser spellings too. The two columns genuinely do use different vocabularies - Windows
+    /// key names on the left, <c>KeyboardEvent.code</c> on the right - and F13 is spelled
+    /// identically in both, which actively suggests they are the same. Someone who has just typed
+    /// <c>KeyD</c> in one column and tries it in the other is not confused about what they want;
+    /// they are being caught out by an inconsistency the interface never mentioned.
+    /// </para>
+    /// <para>
+    /// Accepting both is safe rather than merely lenient: every name here identifies exactly one
+    /// key, so this resolves a spelling rather than guessing an intent.
+    /// </para>
+    /// </remarks>
+    public static bool TryFromBrowserName(string name, out Keys key)
+    {
+        key = Keys.None;
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        name = name.Trim();
+
+        if (name.Length == 6 && name.StartsWith("Digit", StringComparison.OrdinalIgnoreCase) && char.IsAsciiDigit(name[5]))
+        {
+            key = Keys.D0 + (name[5] - '0');
+            return true;
+        }
+
+        if (name.Length == 4 && name.StartsWith("Key", StringComparison.OrdinalIgnoreCase) && char.IsAsciiLetter(name[3]))
+        {
+            key = Keys.A + (char.ToUpperInvariant(name[3]) - 'A');
+            return true;
+        }
+
+        if (name.Length == 7 && name.StartsWith("Numpad", StringComparison.OrdinalIgnoreCase) && char.IsAsciiDigit(name[6]))
+        {
+            key = Keys.NumPad0 + (name[6] - '0');
+            return true;
+        }
+
+        foreach ((Keys candidate, string browserName) in NamedKeys)
+        {
+            if (string.Equals(browserName, name, StringComparison.OrdinalIgnoreCase))
+            {
+                key = candidate;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Plain-English description of what a captured expression will actually deliver.
     /// </summary>
     /// <remarks>
