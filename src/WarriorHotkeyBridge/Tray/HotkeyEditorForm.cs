@@ -30,6 +30,7 @@ internal sealed class HotkeyEditorForm : Form
     private readonly ComboBox _presetPicker;
     private readonly Button _save;
     private readonly Label _summary;
+    private Label _help = null!;
 
     private bool _suppressValidation;
 
@@ -65,51 +66,113 @@ internal sealed class HotkeyEditorForm : Form
 
     // ------------------------------------------------------------------ layout
 
-    private Panel BuildLayout()
+    private TableLayoutPanel BuildLayout()
     {
-        var help = new Label
+        // UseMnemonic off because the text contains "Level 2 & Order Entry", and a Label treats
+        // '&' as the underline-the-next-letter prefix - it renders as "Level 2  Order Entry" and
+        // eats the ampersand entirely.
+        _help = new Label
         {
-            Dock = DockStyle.Top,
-            AutoSize = false,
-            Height = 58,
-            Padding = new Padding(4, 4, 4, 8),
+            AutoSize = true,
+            UseMnemonic = false,
+            Margin = new Padding(0, 0, 0, 10),
             Text =
                 "Each row sends a keyboard shortcut into the Level 2 & Order Entry panel. What that "
-                + "shortcut DOES is set in Warrior SIM's own hotkey settings - this only delivers it.\r\n"
-                + "Use Shift+Digit1 rather than Shift+1. Leave Send empty and set Action to Test or "
-                + "Diagnostics for a key that sends nothing.",
+                + "shortcut DOES is set in Warrior SIM's own hotkey settings - this only delivers it. "
+                + "Use Shift+Digit1 rather than Shift+1. Leave the Sends column empty and pick an "
+                + "Action for a key that sends nothing.",
         };
 
-        var presetRow = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = false, Padding = new Padding(0, 0, 0, 6) };
-        var loadPreset = new Button { Text = "Load", AutoSize = true };
+        var loadPreset = new Button { Text = "Load", AutoSize = true, Margin = new Padding(6, 0, 0, 0) };
         loadPreset.Click += OnLoadPreset;
-        presetRow.Controls.AddRange([new Label { Text = "Preset:", AutoSize = true, Padding = new Padding(0, 6, 4, 0) }, _presetPicker, loadPreset]);
 
-        var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, AutoSize = true };
+        var addRow = new Button { Text = "Add row", AutoSize = true, Margin = new Padding(18, 0, 0, 0) };
+        addRow.Click += OnAddRow;
+
+        var removeRow = new Button { Text = "Remove row", AutoSize = true, Margin = new Padding(6, 0, 0, 0) };
+        removeRow.Click += OnRemoveRow;
+
+        var toolbar = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false,
+            Margin = new Padding(0, 0, 0, 8),
+        };
+
+        toolbar.Controls.AddRange(
+        [
+            new Label { Text = "Preset:", AutoSize = true, Margin = new Padding(0, 6, 0, 0) },
+            _presetPicker,
+            loadPreset,
+            addRow,
+            removeRow,
+        ]);
+
         var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, AutoSize = true, Padding = new Padding(12, 4, 12, 4) };
-        var remove = new Button { Text = "Remove row", AutoSize = true };
-        remove.Click += OnRemoveRow;
         _save.Click += OnSave;
-        buttons.Controls.AddRange([cancel, _save, remove]);
 
-        var bottom = new TableLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, ColumnCount = 2, RowCount = 1, Padding = new Padding(0, 6, 0, 0) };
+        // WrapContents off: with it on, the panel wrapped three buttons into a vertical stack the
+        // moment its width was even slightly tight.
+        var buttons = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.RightToLeft,
+            WrapContents = false,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        };
+
+        buttons.Controls.AddRange([cancel, _save]);
+
+        var bottom = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 8, 0, 0) };
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.Controls.Add(_summary, 0, 0);
         bottom.Controls.Add(buttons, 1, 0);
 
-        var problemsPanel = new Panel { Dock = DockStyle.Bottom, Height = 90, Padding = new Padding(0, 6, 0, 0) };
-        problemsPanel.Controls.Add(_problems);
+        // A table rather than nested docking. Docking resolves in reverse z-order, which is easy
+        // to get subtly wrong and impossible to read later; rows with explicit styles say what
+        // grows and what does not.
+        var host = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            Padding = new Padding(12),
+            ColumnCount = 1,
+            RowCount = 5,
+        };
 
-        var host = new Panel { Dock = DockStyle.Fill, Padding = new Padding(10) };
-        host.Controls.Add(_grid);
-        host.Controls.Add(problemsPanel);
-        host.Controls.Add(bottom);
-        host.Controls.Add(presetRow);
-        host.Controls.Add(help);
+        host.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        host.RowStyles.Add(new RowStyle(SizeType.AutoSize));   // help
+        host.RowStyles.Add(new RowStyle(SizeType.AutoSize));   // toolbar
+        host.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // grid
+        host.RowStyles.Add(new RowStyle(SizeType.AutoSize));   // problems
+        host.RowStyles.Add(new RowStyle(SizeType.AutoSize));   // buttons
 
-        CancelButton = (Button)buttons.Controls[0];
+        host.Controls.Add(_help, 0, 0);
+        host.Controls.Add(toolbar, 0, 1);
+        host.Controls.Add(_grid, 0, 2);
+        host.Controls.Add(_problems, 0, 3);
+        host.Controls.Add(bottom, 0, 4);
+
+        // An AutoSize label only wraps if something bounds its width. Without this it lays out as
+        // one enormously wide line and the form simply clips it, which is what the fixed height
+        // was hiding.
+        host.Resize += (_, _) => ConstrainHelpWidth(host);
+        ConstrainHelpWidth(host);
+
+        CancelButton = cancel;
         return host;
+    }
+
+    private static void ConstrainHelpWidth(TableLayoutPanel host)
+    {
+        if (host.Controls.Count > 0 && host.Controls[0] is Label help)
+        {
+            int available = host.ClientSize.Width - host.Padding.Horizontal;
+            help.MaximumSize = new Size(Math.Max(120, available), 0);
+        }
     }
 
     private DataGridView BuildGrid()
@@ -118,21 +181,33 @@ internal sealed class HotkeyEditorForm : Form
         {
             Dock = DockStyle.Fill,
             AutoGenerateColumns = false,
-            AllowUserToAddRows = true,
+
+            // Off, with an explicit Add row button instead. The built-in placeholder renders as a
+            // permanent blank row under the real ones and reads as a stray record rather than as
+            // an invitation - especially in a grid whose rows are trading keys.
+            AllowUserToAddRows = false,
             AllowUserToDeleteRows = true,
             AllowUserToResizeRows = false,
             RowHeadersVisible = false,
-            SelectionMode = DataGridViewSelectionMode.CellSelect,
+            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
             EditMode = DataGridViewEditMode.EditOnEnter,
+
+            // Otherwise the space below the last row is control-grey and looks like a dead panel
+            // pasted under the table.
+            BackgroundColor = SystemColors.Window,
+            BorderStyle = BorderStyle.FixedSingle,
             DataSource = _rows,
         };
 
+        // Level2Index is deliberately not a column. It selects a Level 2 panel by position in the
+        // page, which is the fragile mechanism colour-link is meant to replace - so putting it in
+        // front of every operator would be advertising the thing we intend to retire. Values
+        // already in the configuration file are preserved untouched; the row carries them through.
         grid.Columns.AddRange(
             TextColumn(nameof(BindingRow.Hotkey), "Hotkey", 110),
-            TextColumn(nameof(BindingRow.Send), "Sends into Level 2", 170),
-            Choice(nameof(BindingRow.Action), "Action", 110, ["", "Test", "Diagnostics"]),
-            TextColumn(nameof(BindingRow.Label), "Label (yours - never interpreted)", 280),
-            TextColumn(nameof(BindingRow.Level2Index), "Level 2 #", 80));
+            TextColumn(nameof(BindingRow.Send), "Sends into Level 2", 180),
+            Choice(nameof(BindingRow.Action), "Action", 120, ["", "Test", "Diagnostics"]),
+            TextColumn(nameof(BindingRow.Label), "Label (yours - never interpreted)", 300));
 
         grid.Columns[3].AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
 
@@ -169,6 +244,11 @@ internal sealed class HotkeyEditorForm : Form
         return column;
     }
 
+    /// <remarks>
+    /// Starts hidden and appears only when there is something to report. Left permanently visible
+    /// it is an empty white box between the grid and the buttons, which reads as another input the
+    /// operator is supposed to fill in.
+    /// </remarks>
     private static TextBox BuildProblemBox() => new()
     {
         Dock = DockStyle.Fill,
@@ -176,7 +256,11 @@ internal sealed class HotkeyEditorForm : Form
         ReadOnly = true,
         ScrollBars = ScrollBars.Vertical,
         BackColor = SystemColors.Window,
-        ForeColor = Color.FromArgb(160, 40, 40),
+        BorderStyle = BorderStyle.FixedSingle,
+        Height = 76,
+        Margin = new Padding(0, 8, 0, 0),
+        Visible = false,
+        TabStop = false,
     };
 
     private ComboBox BuildPresetPicker()
@@ -242,6 +326,20 @@ internal sealed class HotkeyEditorForm : Form
         {
             LoadRows(choice.Preset.Bindings);
             Revalidate();
+        }
+    }
+
+    private void OnAddRow(object? sender, EventArgs e)
+    {
+        _rows.Add(new BindingRow());
+        Revalidate();
+
+        // Land the caret in the new row's first cell, so adding a row and typing a key is one
+        // continuous motion rather than add-then-hunt-for-the-cell.
+        if (_grid.Rows.Count > 0)
+        {
+            _grid.CurrentCell = _grid.Rows[^1].Cells[0];
+            _grid.BeginEdit(selectAll: true);
         }
     }
 
@@ -314,10 +412,11 @@ internal sealed class HotkeyEditorForm : Form
             }
         }
 
-        _problems.Text = problems.Count == 0 ? string.Empty : string.Join(Environment.NewLine, problems);
+        _problems.Text = string.Join(Environment.NewLine, problems);
+        _problems.Visible = problems.Count > 0;
         _problems.ForeColor = problems.All(p => p.StartsWith("Note:", StringComparison.Ordinal))
-            ? Color.FromArgb(90, 90, 90)
-            : Color.FromArgb(160, 40, 40);
+            ? Color.FromArgb(70, 70, 70)
+            : Color.FromArgb(150, 35, 35);
 
         bool blocking = problems.Any(p => !p.StartsWith("Note:", StringComparison.Ordinal));
 
