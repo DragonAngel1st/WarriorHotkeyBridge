@@ -65,6 +65,12 @@ internal static partial class BridgeLog
     [LoggerMessage(EventId = 214, Level = LogLevel.Warning, Message = "[STARTUP] The startup preference file exists but could not be read; leaving startup untouched rather than guessing. Use the tray toggle to set it again.")]
     public static partial void StartupPreferenceUnreadable(this ILogger logger);
 
+    [LoggerMessage(EventId = 215, Level = LogLevel.Information, Message = "[HOTKEY] Saved and applied {Count} hotkey binding(s) from the editor.")]
+    public static partial void HotkeyConfigurationSaved(this ILogger logger, int count);
+
+    [LoggerMessage(EventId = 216, Level = LogLevel.Error, Message = "[HOTKEY] Could not save the hotkey configuration; nothing was applied: {Reason}")]
+    public static partial void HotkeyConfigurationSaveFailed(this ILogger logger, string reason);
+
     [LoggerMessage(EventId = 211, Level = LogLevel.Information, Message = "[STARTUP] Updated from {PreviousVersion} to {CurrentVersion} with Start with Windows off; asking whether to re-enable it.")]
     public static partial void StartupOfferingAfterUpdate(this ILogger logger, string previousVersion, string currentVersion);
 

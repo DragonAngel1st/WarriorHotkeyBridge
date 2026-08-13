@@ -3,7 +3,9 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Extensions.Logging;
+using WarriorHotkeyBridge.Configuration;
 using WarriorHotkeyBridge.Diagnostics;
+using WarriorHotkeyBridge.Hotkeys;
 using WarriorHotkeyBridge.Models;
 using WarriorHotkeyBridge.Services;
 using WarriorHotkeyBridge.Startup;
@@ -52,12 +54,24 @@ internal sealed class TrayIconService : IDisposable
     /// </remarks>
     private string? _notifiedError;
 
+    private readonly IHotkeyBindingStore _bindings;
+    private readonly IUserConfigurationWriter _configurationWriter;
+    private readonly IHotkeyPresetProvider _presets;
+    private readonly GlobalHotkeyService _hotkeys;
+
+    /// <summary>The open editor, so a second click focuses it rather than opening another.</summary>
+    private HotkeyEditorForm? _editor;
+
     public TrayIconService(
         IBridgeStateService state,
         IUiDispatcher ui,
         AppPaths paths,
         IStartupManager startup,
         IStartupPreferenceStore preferences,
+        IHotkeyBindingStore bindings,
+        IUserConfigurationWriter configurationWriter,
+        IHotkeyPresetProvider presets,
+        GlobalHotkeyService hotkeys,
         TimeProvider time,
         ILogger<TrayIconService> logger)
     {
@@ -66,6 +80,10 @@ internal sealed class TrayIconService : IDisposable
         _paths = paths;
         _startup = startup;
         _preferences = preferences;
+        _bindings = bindings;
+        _configurationWriter = configurationWriter;
+        _presets = presets;
+        _hotkeys = hotkeys;
         _time = time;
         _logger = logger;
     }
@@ -149,6 +167,9 @@ internal sealed class TrayIconService : IDisposable
         _startWithWindowsItem = new ToolStripMenuItem("Start with Windows") { CheckOnClick = false };
         _startWithWindowsItem.Click += (_, _) => ToggleStartWithWindows();
 
+        var configureHotkeys = new ToolStripMenuItem("Configure Hotkeys...");
+        configureHotkeys.Click += (_, _) => ShowHotkeyEditor();
+
         var reconnect = new ToolStripMenuItem("Reconnect to Chrome");
         reconnect.Click += (_, _) => ReconnectRequested?.Invoke(this, EventArgs.Empty);
 
@@ -177,6 +198,7 @@ internal sealed class TrayIconService : IDisposable
             _lastCommandItem,
             _lastErrorItem,
             new ToolStripSeparator(),
+            configureHotkeys,
             _startWithWindowsItem,
             reconnect,
             diagnostics,
@@ -196,6 +218,79 @@ internal sealed class TrayIconService : IDisposable
 
     /// <summary>A non-interactive menu row used purely to display state.</summary>
     private static ToolStripMenuItem CreateInfoItem() => new(string.Empty) { Enabled = false };
+
+    /// <summary>
+    /// Opens the mapping editor and, if the operator saves, persists and re-registers.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Order matters here: the file is written before the keys are re-registered. If the write
+    /// fails - a read-only file, a full disk - nothing is applied, so what the bridge is doing and
+    /// what the file says never diverge. Re-registering first would leave the operator with keys
+    /// that work until the next restart and then silently revert.
+    /// </para>
+    /// <para>
+    /// Shown non-modally so the operator can keep using the SIM while editing, but tracked so a
+    /// second click on the menu item brings the existing window forward rather than opening a
+    /// second editor whose Save would overwrite the first.
+    /// </para>
+    /// </remarks>
+    private void ShowHotkeyEditor()
+    {
+        if (_editor is { IsDisposed: false })
+        {
+            _editor.WindowState = FormWindowState.Normal;
+            _editor.Activate();
+            return;
+        }
+
+        var editor = new HotkeyEditorForm(_bindings.Current, _presets);
+        _editor = editor;
+
+        editor.FormClosed += (_, _) =>
+        {
+            _editor = null;
+
+            if (editor.DialogResult is not DialogResult.OK)
+            {
+                editor.Dispose();
+                return;
+            }
+
+            ApplyBindings(editor.Result);
+            editor.Dispose();
+        };
+
+        editor.Show();
+        editor.Activate();
+    }
+
+    private void ApplyBindings(IReadOnlyDictionary<string, HotkeyBindingConfig> bindings)
+    {
+        string? error = _configurationWriter.TryWriteBindings(bindings);
+
+        if (error is not null)
+        {
+            _logger.HotkeyConfigurationSaveFailed(error);
+
+            MessageBox.Show(
+                $"Your hotkeys could not be saved, so nothing has been changed.\n\n{error}",
+                AppInfo.ProductName,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+
+            return;
+        }
+
+        _bindings.Replace(bindings);
+
+        // Already on the UI thread - this runs from a menu click - which is where Win32 requires
+        // hotkey registration to happen.
+        _hotkeys.Reapply();
+
+        _logger.HotkeyConfigurationSaved(bindings.Count);
+        ShowBalloon(AppInfo.ProductName, $"{bindings.Count} hotkey(s) applied.", ToolTipIcon.Info);
+    }
 
     private void OnStateChanged(object? sender, BridgeStateChangedEventArgs e) =>
         // Always render the authoritative current snapshot rather than the event payload:

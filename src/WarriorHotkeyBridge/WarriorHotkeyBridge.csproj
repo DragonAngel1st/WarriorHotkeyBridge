@@ -24,6 +24,13 @@
     <None Update="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+
+    <!-- Shipped hotkey presets. Data, not code: adding one is a file, not a rebuild. These are
+         replaced on upgrade, so the editor treats them as read-only; the operator's own presets
+         live under %LOCALAPPDATA% and survive. -->
+    <None Update="Presets\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <!-- Pure logic (URL validation, hotkey/command mapping, backoff, queue ordering) is

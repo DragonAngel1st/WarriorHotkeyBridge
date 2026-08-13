@@ -12,7 +12,7 @@ namespace WarriorHotkeyBridge.Hotkeys;
 /// <inheritdoc cref="IGlobalHotkeyService"/>
 internal sealed class GlobalHotkeyService : IGlobalHotkeyService, IDisposable
 {
-    private readonly HotkeyOptions _options;
+    private readonly IHotkeyBindingStore _bindings;
     private readonly IBridgeStateService _state;
     private readonly IUiDispatcher _ui;
     private readonly ILogger<GlobalHotkeyService> _logger;
@@ -31,12 +31,12 @@ internal sealed class GlobalHotkeyService : IGlobalHotkeyService, IDisposable
     private bool _disposed;
 
     public GlobalHotkeyService(
-        IOptions<HotkeyOptions> options,
+        IHotkeyBindingStore bindings,
         IBridgeStateService state,
         IUiDispatcher ui,
         ILogger<GlobalHotkeyService> logger)
     {
-        _options = options.Value;
+        _bindings = bindings;
         _state = state;
         _ui = ui;
         _logger = logger;
@@ -58,7 +58,7 @@ internal sealed class GlobalHotkeyService : IGlobalHotkeyService, IDisposable
 
         _state.Update(current => current with { Hotkeys = HotkeyState.Initializing });
 
-        HotkeyBindingResolution resolution = HotkeyBindingResolver.Resolve(_options.Bindings);
+        HotkeyBindingResolution resolution = HotkeyBindingResolver.Resolve(_bindings.Current);
 
         foreach (string problem in resolution.Problems)
         {
@@ -109,6 +109,33 @@ internal sealed class GlobalHotkeyService : IGlobalHotkeyService, IDisposable
         _firstConfigurationProblem = resolution.Problems.Count > 0 ? resolution.Problems[0] : null;
 
         PublishRegistrationState();
+    }
+
+    /// <summary>
+    /// Releases every hotkey and registers the current binding set from scratch.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Releasing everything first, rather than computing a difference and touching only the keys
+    /// that changed, is a deliberate simplification. Windows grants a hotkey to one window at a
+    /// time, so re-registering a key the process already holds fails - meaning a diff would have
+    /// to be exactly right about which keys are unchanged, and being wrong leaves a trading key
+    /// silently dead. A full cycle is a few dozen Win32 calls and cannot be subtly wrong.
+    /// </para>
+    /// <para>
+    /// The cost is a window of a millisecond or two in which the keys belong to nobody. Another
+    /// application could in principle take one, which is exactly the flapping hazard that ruled
+    /// out automatic re-registration on file changes - but here the operator is sitting in front
+    /// of a dialog they just clicked Save in, not trading, so the trade-off is acceptable.
+    /// </para>
+    /// </remarks>
+    public void Reapply()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        EnsureUiThread();
+
+        UnregisterAll();
+        RegisterAll();
     }
 
     /// <summary>

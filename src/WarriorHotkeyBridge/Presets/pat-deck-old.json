@@ -1,0 +1,18 @@
+{
+  "name": "Pat's Deck (old)",
+  "description": "The original ten-key layout, transcribed from the AutoHotkey script it replaced. Superseded by the full-deck layout, kept so it can be restored in one step.",
+  "bindings": {
+    "F13": { "Send": "Shift+Digit1", "Label": "Buy 1000 ASK +0.05" },
+    "F14": { "Send": "Shift+Digit2", "Label": "Sell 1/2 position on Ask" },
+    "F15": { "Send": "Shift+Digit3", "Label": "Buy 100 ASK +0.05" },
+    "F16": { "Send": "Shift+Digit4", "Label": "Sell 100 shares on Bid -0.05" },
+    "F17": { "Send": "Control+KeyZ", "Label": "Ctrl+Z action (unlabelled in the AHK script)" },
+    "F18": { "Send": "Shift+Digit5", "Label": "Sell open position on Bid -0.05" },
+    "F19": { "Send": "Control+KeyX", "Label": "Sell 1/2 position on Bid -0.05" },
+    "F20": { "Send": "Shift+Digit7", "Label": "Sell 1000 -0.05" },
+    "F21": { "Send": "Shift+Digit6", "Label": "Buy 75% BP" },
+    "F22": { "Send": "Control+KeyQ", "Label": "Cancel all orders" },
+    "F23": { "Action": "Test", "Label": "Targeting test - sends nothing" },
+    "F24": { "Action": "Diagnostics", "Label": "Write diagnostic report" }
+  }
+}

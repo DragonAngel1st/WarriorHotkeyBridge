@@ -567,6 +567,9 @@ internal static class Program
         // Reclaims hotkeys that another application was holding when the bridge started.
         services.AddHostedService<HotkeyRetryWorker>();
 
+        services.AddSingleton<IHotkeyBindingStore, HotkeyBindingStore>();
+        services.AddSingleton<IUserConfigurationWriter, UserConfigurationWriter>();
+        services.AddSingleton<IHotkeyPresetProvider, HotkeyPresetProvider>();
         services.AddSingleton<GlobalHotkeyService>();
         services.AddSingleton<IGlobalHotkeyService>(sp => sp.GetRequiredService<GlobalHotkeyService>());
 
