@@ -97,6 +97,22 @@ public class HotkeyEditorFormTests
 
     private sealed class StubPresets(IReadOnlyList<HotkeyPreset> presets) : IHotkeyPresetProvider
     {
+        public string UserPresetDirectory => Path.Combine(Path.GetTempPath(), "whb-stub-presets");
+
         public IReadOnlyList<HotkeyPreset> Load() => presets;
+
+        public (bool Exists, bool IsShipped) Describe(string name)
+        {
+            HotkeyPreset? match = presets.FirstOrDefault(p =>
+                string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+
+            return match is null ? (false, false) : (true, !match.IsUserSupplied);
+        }
+
+        public string? TrySave(
+            string name,
+            string? description,
+            IReadOnlyDictionary<string, HotkeyBindingConfig> bindings,
+            bool overwrite) => null;
     }
 }

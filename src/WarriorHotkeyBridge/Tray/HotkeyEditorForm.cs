@@ -31,6 +31,7 @@ internal sealed class HotkeyEditorForm : Form
     private readonly Button _save;
     private readonly Label _summary;
     private Label _help = null!;
+    private Button _saveAsPreset = null!;
 
     private bool _suppressValidation;
 
@@ -86,6 +87,9 @@ internal sealed class HotkeyEditorForm : Form
         var loadPreset = new Button { Text = "Load", AutoSize = true, Margin = new Padding(6, 0, 0, 0) };
         loadPreset.Click += OnLoadPreset;
 
+        _saveAsPreset = new Button { Text = "Save as preset...", AutoSize = true, Margin = new Padding(6, 0, 0, 0) };
+        _saveAsPreset.Click += OnSaveAsPreset;
+
         var addRow = new Button { Text = "Add row", AutoSize = true, Margin = new Padding(18, 0, 0, 0) };
         addRow.Click += OnAddRow;
 
@@ -106,6 +110,7 @@ internal sealed class HotkeyEditorForm : Form
             new Label { Text = "Preset:", AutoSize = true, Margin = new Padding(0, 6, 0, 0) },
             _presetPicker,
             loadPreset,
+            _saveAsPreset,
             addRow,
             removeRow,
         ]);
@@ -327,6 +332,101 @@ internal sealed class HotkeyEditorForm : Form
             LoadRows(choice.Preset.Bindings);
             Revalidate();
         }
+    }
+
+    /// <summary>
+    /// Saves what is in the grid as a named preset, without applying it.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately separate from Save &amp; Apply. Naming a layout and arming it are different
+    /// decisions - the common case for this button is capturing a layout you are part-way through
+    /// building, or snapshotting the current one before trying something else. Coupling them would
+    /// mean you could not keep a copy without also making it live.
+    /// </remarks>
+    private void OnSaveAsPreset(object? sender, EventArgs e)
+    {
+        _grid.EndEdit();
+        Revalidate();
+
+        if (Result.Count == 0)
+        {
+            MessageBox.Show(this, "There is nothing to save yet.", "Save preset", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        IReadOnlyList<HotkeyPreset> existing = _presets.Load();
+        using var dialog = new PresetNameDialog(PresetNameDialog.SuggestName(existing.Select(p => p.Name)));
+
+        if (dialog.ShowDialog(this) is not DialogResult.OK)
+        {
+            return;
+        }
+
+        (bool exists, bool isShipped) = _presets.Describe(dialog.PresetName);
+
+        if (exists && !isShipped)
+        {
+            DialogResult replace = MessageBox.Show(
+                this,
+                $"A preset named \"{dialog.PresetName}\" already exists. Replace it?",
+                "Save preset",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button2);
+
+            if (replace is not DialogResult.Yes)
+            {
+                return;
+            }
+        }
+
+        string? error = _presets.TrySave(dialog.PresetName, dialog.PresetDescription, Result, overwrite: true);
+
+        if (error is not null)
+        {
+            MessageBox.Show(this, error, "Save preset", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        RefreshPresets(dialog.PresetName);
+
+        MessageBox.Show(
+            this,
+            $"Saved \"{dialog.PresetName}\" with {Result.Count} hotkey(s).\n\n"
+            + "This has not changed your active hotkeys - use Save & Apply for that.\n\n"
+            + $"Presets are files in:\n{_presets.UserPresetDirectory}",
+            "Save preset",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
+    }
+
+    /// <summary>Reloads the picker from disk and selects <paramref name="select"/> if present.</summary>
+    private void RefreshPresets(string? select)
+    {
+        _presetPicker.Items.Clear();
+
+        IReadOnlyList<HotkeyPreset> presets = _presets.Load();
+
+        foreach (HotkeyPreset preset in presets)
+        {
+            _presetPicker.Items.Add(new PresetChoice(preset));
+        }
+
+        if (_presetPicker.Items.Count == 0)
+        {
+            _presetPicker.Items.Add("(no presets installed)");
+            _presetPicker.Enabled = false;
+            _presetPicker.SelectedIndex = 0;
+            return;
+        }
+
+        _presetPicker.Enabled = true;
+
+        int index = select is null
+            ? 0
+            : Math.Max(0, presets.ToList().FindIndex(p => string.Equals(p.Name, select, StringComparison.OrdinalIgnoreCase)));
+
+        _presetPicker.SelectedIndex = index;
     }
 
     private void OnAddRow(object? sender, EventArgs e)

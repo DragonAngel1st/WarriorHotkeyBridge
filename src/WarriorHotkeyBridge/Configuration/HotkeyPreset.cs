@@ -32,6 +32,25 @@ internal interface IHotkeyPresetProvider
 {
     /// <summary>Every preset found, shipped ones first. Never throws; unreadable files are skipped.</summary>
     IReadOnlyList<HotkeyPreset> Load();
+
+    /// <summary>Where the operator's own presets are kept.</summary>
+    string UserPresetDirectory { get; }
+
+    /// <summary>
+    /// Saves the bindings as a named preset the operator owns.
+    /// </summary>
+    /// <param name="overwrite">
+    /// False makes an existing preset of the same name an error rather than a silent replacement.
+    /// </param>
+    /// <returns>Null on success, or a message describing why it could not be saved.</returns>
+    string? TrySave(
+        string name,
+        string? description,
+        IReadOnlyDictionary<string, HotkeyBindingConfig> bindings,
+        bool overwrite);
+
+    /// <summary>Whether a preset of this name already exists, and whether it may be replaced.</summary>
+    (bool Exists, bool IsShipped) Describe(string name);
 }
 
 /// <summary>
@@ -59,6 +78,17 @@ internal sealed class HotkeyPresetProvider : IHotkeyPresetProvider
         PropertyNameCaseInsensitive = true,
         ReadCommentHandling = JsonCommentHandling.Skip,
         AllowTrailingCommas = true,
+    };
+
+    /// <remarks>
+    /// Indented and relaxed-escaped because these files are meant to be opened, read and shared
+    /// by people - an escaped apostrophe in "Ross's" helps nobody.
+    /// </remarks>
+    private static readonly JsonSerializerOptions WriteOptions = new()
+    {
+        WriteIndented = true,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
     private readonly AppPaths _paths;
@@ -106,6 +136,117 @@ internal sealed class HotkeyPresetProvider : IHotkeyPresetProvider
         }
 
         return presets;
+    }
+
+    public (bool Exists, bool IsShipped) Describe(string name)
+    {
+        HotkeyPreset? match = Load()
+            .FirstOrDefault(p => string.Equals(p.Name, name?.Trim(), StringComparison.OrdinalIgnoreCase));
+
+        return match is null ? (false, false) : (true, !match.IsUserSupplied);
+    }
+
+    public string? TrySave(
+        string name,
+        string? description,
+        IReadOnlyDictionary<string, HotkeyBindingConfig> bindings,
+        bool overwrite)
+    {
+        ArgumentNullException.ThrowIfNull(bindings);
+
+        name = name?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return "A preset needs a name.";
+        }
+
+        if (bindings.Count == 0)
+        {
+            return "A preset with no hotkeys would wipe the operator's keys when loaded.";
+        }
+
+        (bool exists, bool isShipped) = Describe(name);
+
+        // Shipped presets are replaced wholesale on upgrade, so a user preset that shadowed one
+        // would appear to work and then silently revert. Rejecting the name is clearer than
+        // allowing a duplicate the list cannot distinguish.
+        if (exists && isShipped)
+        {
+            return $"\"{name}\" is a preset that ships with the application. Choose a different name.";
+        }
+
+        if (exists && !overwrite)
+        {
+            return $"A preset named \"{name}\" already exists.";
+        }
+
+        try
+        {
+            Directory.CreateDirectory(UserPresetDirectory);
+
+            string path = ResolveFilePath(name);
+
+            var preset = new HotkeyPreset
+            {
+                Name = name,
+                Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim(),
+                Bindings = new Dictionary<string, HotkeyBindingConfig>(bindings, StringComparer.OrdinalIgnoreCase),
+            };
+
+            File.WriteAllText(path, JsonSerializer.Serialize(preset, WriteOptions));
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
+        {
+            return ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Turns a display name into a file path inside the preset directory.
+    /// </summary>
+    /// <remarks>
+    /// The name is typed by a person into a dialog, so it is untrusted input being turned into a
+    /// path. Everything outside a small safe set is stripped rather than escaped, and the result
+    /// is then checked to be a direct child of the preset directory - so a name like
+    /// <c>..\..\startup</c> cannot write outside it, however the stripping is later changed.
+    /// </remarks>
+    private string ResolveFilePath(string name)
+    {
+        Span<char> buffer = stackalloc char[name.Length];
+        int length = 0;
+
+        foreach (char c in name)
+        {
+            if (char.IsAsciiLetterOrDigit(c))
+            {
+                buffer[length++] = char.ToLowerInvariant(c);
+            }
+            else if ((c is ' ' or '-' or '_') && length > 0 && buffer[length - 1] != '-')
+            {
+                buffer[length++] = '-';
+            }
+        }
+
+        string slug = new string(buffer[..length]).Trim('-');
+
+        if (slug.Length == 0)
+        {
+            slug = "preset";
+        }
+
+        string directory = Path.GetFullPath(UserPresetDirectory);
+        string path = Path.GetFullPath(Path.Combine(directory, slug + ".json"));
+
+        // Belt and braces. The slug cannot contain a separator today; this makes that a checked
+        // property rather than a thing a future edit could quietly remove.
+        if (!string.Equals(Path.GetDirectoryName(path), directory.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException($"'{name}' does not produce a usable file name.", nameof(name));
+        }
+
+        return path;
     }
 
     private static HotkeyPreset? TryRead(string file, bool userSupplied)
