@@ -7,6 +7,31 @@ Stream Deck, or any device that can send F13–F24) and routes them directly int
 Trading SIM** web application running in Google Chrome — over the Chrome DevTools Protocol,
 without stealing Windows focus and without AutoHotkey.
 
+## Download and install
+
+**[⬇ Download the latest installer](https://github.com/DragonAngel1st/WarriorHotkeyBridge/releases/latest)** —
+`WarriorHotkeyBridge-Setup-x64.msi`, about 65 MB.
+
+Double-click it. There is nothing else to install: the .NET runtime is included, so you do not
+need .NET on the machine, and the bridge attaches to the Chrome you already have rather than
+downloading a browser of its own. It installs for the current user only, so there is no
+administrator prompt, and it starts itself when the install finishes — look for the tray icon
+behind the **`^`** chevron next to the clock.
+
+> **Windows will warn you that the publisher is unknown.** The installer is not code-signed,
+> because a signing certificate is a paid annual subscription and this project is free. Choose
+> **More info → Run anyway**. If you would rather not trust a binary from the internet — a
+> perfectly reasonable position for something that can place trades — build it yourself with
+> `pwsh -File installer/Build-Installer.ps1` and install the MSI that produces. Each release
+> lists the SHA-256 of the file it shipped so you can verify what you downloaded.
+
+Once installed, read [Configuring hotkeys](#10-configuring-hotkeys). A fresh install has **no
+trading bindings** — only `F23` (Test) and `F24` (Diagnostics), neither of which sends a
+keystroke. That is deliberate: an installer that shipped working buy and sell keys to a stranger's
+machine would be reckless. The first run writes a commented template explaining the format.
+
+---
+
 > **Build status: all ten phases complete.** Hotkeys, Chrome/CDP, Level 2 targeting, command
 > dispatch, recovery, diagnostics, start-with-Windows and the MSI installer are implemented and
 > verified on a live SIM session. 160 unit tests; builds with warnings as errors.
