@@ -32,9 +32,7 @@ internal sealed class HotkeyEditorForm : Form
     private readonly Label _summary;
     private Label _help = null!;
     private Button _saveAsPreset = null!;
-    private Button _capture = null!;
-    private Button _captureHotkey = null!;
-    private readonly Func<IDisposable>? _suppressDispatch;
+    private readonly ToolTip _tooltip = new() { AutoPopDelay = 20000, InitialDelay = 400, ReshowDelay = 200 };
     private readonly Func<Action<HotkeyGesture>, IDisposable>? _captureRegisteredPresses;
 
     private bool _suppressValidation;
@@ -42,17 +40,15 @@ internal sealed class HotkeyEditorForm : Form
     public HotkeyEditorForm(
         IReadOnlyDictionary<string, HotkeyBindingConfig> current,
         IHotkeyPresetProvider presets,
-        Func<IDisposable>? suppressDispatch = null,
         Func<Action<HotkeyGesture>, IDisposable>? captureRegisteredPresses = null)
     {
         ArgumentNullException.ThrowIfNull(current);
         _presets = presets;
-        _captureRegisteredPresses = captureRegisteredPresses;
 
         // Optional so the form stays constructible in tests without a hotkey service. In the
-        // application it is always supplied - see the guard in OnCaptureKey, which refuses to
-        // capture rather than capturing with live keys.
-        _suppressDispatch = suppressDispatch;
+        // application it is always supplied; the capture handlers refuse to run without it rather
+        // than capturing while the keys are live.
+        _captureRegisteredPresses = captureRegisteredPresses;
 
         Text = $"{AppInfo.ProductName} - Hotkeys";
         StartPosition = FormStartPosition.CenterScreen;
@@ -93,28 +89,22 @@ internal sealed class HotkeyEditorForm : Form
                 "Each row sends a keyboard shortcut into the Level 2 & Order Entry panel. What that "
                 + "shortcut DOES is set in Warrior SIM's own hotkey settings - this only delivers it. "
                 + "Leave the Sends column empty and pick an Action for a key that sends nothing.\r\n"
-                + "Hotkey is the key your Stream Deck sends (F13, Ctrl+Alt+D). Sends is the key the "
-                + "browser receives, so a physical Shift+1 is written Shift+Digit1 - select a row and "
-                + "use Capture key rather than typing it.",
+                + "Click a Hotkey or Sends cell to set it - press the key, or type it. "
+                + "Right-click a row to add, duplicate or remove it.",
         };
 
         var loadPreset = new Button { Text = "Load", AutoSize = true, Margin = new Padding(6, 0, 0, 0) };
         loadPreset.Click += OnLoadPreset;
 
-        _saveAsPreset = new Button { Text = "Save as preset...", AutoSize = true, Margin = new Padding(6, 0, 0, 0) };
+        _saveAsPreset = new Button { Text = "Copy preset...", AutoSize = true, Margin = new Padding(6, 0, 0, 0) };
         _saveAsPreset.Click += OnSaveAsPreset;
 
-        _captureHotkey = new Button { Text = "Capture hotkey...", AutoSize = true, Margin = new Padding(18, 0, 0, 0) };
-        _captureHotkey.Click += OnCaptureHotkey;
-
-        _capture = new Button { Text = "Capture sends...", AutoSize = true, Margin = new Padding(6, 0, 0, 0) };
-        _capture.Click += OnCaptureKey;
-
-        var addRow = new Button { Text = "Add row", AutoSize = true, Margin = new Padding(18, 0, 0, 0) };
-        addRow.Click += OnAddRow;
-
-        var removeRow = new Button { Text = "Remove row", AutoSize = true, Margin = new Padding(6, 0, 0, 0) };
-        removeRow.Click += OnRemoveRow;
+        // The name has to be short enough to sit in a toolbar; the tooltip carries what it
+        // actually does, which is too long to be a label.
+        _tooltip.SetToolTip(
+            _saveAsPreset,
+            "Copy the hotkeys currently shown here into a new preset file, under a name you choose.\r\n"
+            + "This does not change your active hotkeys - use Save & Apply for that.");
 
         // Wrapping ON here, unlike the OK/Cancel panel. That one had to stay on one line because a
         // stacked Save-above-Cancel looks broken; a toolbar spilling onto a second row is ordinary,
@@ -135,10 +125,6 @@ internal sealed class HotkeyEditorForm : Form
             _presetPicker,
             loadPreset,
             _saveAsPreset,
-            _captureHotkey,
-            _capture,
-            addRow,
-            removeRow,
         ]);
 
         var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, AutoSize = true, Padding = new Padding(12, 4, 12, 4) };
@@ -242,6 +228,25 @@ internal sealed class HotkeyEditorForm : Form
 
         grid.Columns[3].AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
 
+        // The two key columns are set through the capture dialog, never typed in place. Editing
+        // them here would mean intercepting keystrokes inside a grid cell, and a cell that
+        // swallows every key while looking like an ordinary text box is a worse thing to hand
+        // someone than a dialog that says what it is doing. The dialog still allows typing, so
+        // nothing is lost - only moved somewhere it can be explained.
+        grid.Columns[0].ReadOnly = true;
+        grid.Columns[1].ReadOnly = true;
+        grid.Columns[0].DefaultCellStyle.BackColor = Color.FromArgb(248, 250, 252);
+        grid.Columns[1].DefaultCellStyle.BackColor = Color.FromArgb(248, 250, 252);
+
+        grid.CellClick += OnCellClick;
+        grid.CellDoubleClick += OnCellClick;
+
+        // Row management without toolbar buttons: right-click for the menu, Insert and Delete for
+        // the keyboard. Both are standard Windows list idioms, and the menu is what makes them
+        // discoverable - a keyboard-only affordance nobody is told about is not an affordance.
+        grid.ContextMenuStrip = BuildRowMenu();
+        grid.KeyDown += OnGridKeyDown;
+
         // Validation on every edit rather than only on save, so the operator sees the problem
         // beside the row that has it instead of a list at the end.
         grid.CellValueChanged += (_, _) => Revalidate();
@@ -256,6 +261,70 @@ internal sealed class HotkeyEditorForm : Form
         grid.DataError += (_, e) => e.ThrowException = false;
 
         return grid;
+    }
+
+    private ContextMenuStrip BuildRowMenu()
+    {
+        var add = new ToolStripMenuItem("Add row", null, (_, _) => AddRow()) { ShortcutKeyDisplayString = "Insert" };
+        var duplicate = new ToolStripMenuItem("Duplicate row", null, (_, _) => DuplicateRow());
+        var remove = new ToolStripMenuItem("Remove row", null, (_, _) => RemoveRow()) { ShortcutKeyDisplayString = "Delete" };
+
+        var menu = new ContextMenuStrip();
+        menu.Items.AddRange([add, duplicate, new ToolStripSeparator(), remove]);
+
+        // Duplicate and Remove are meaningless without a row, and a menu offering actions that
+        // silently do nothing teaches people to distrust it.
+        menu.Opening += (_, _) =>
+        {
+            bool hasRow = _grid.CurrentRow is { Index: >= 0 and var i } && i < _rows.Count;
+            duplicate.Enabled = hasRow;
+            remove.Enabled = hasRow;
+        };
+
+        return menu;
+    }
+
+    /// <remarks>
+    /// Delete is handled rather than left to the grid's own row deletion, so removing a row goes
+    /// through the same path as the menu and revalidates afterwards.
+    /// </remarks>
+    private void OnGridKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.KeyCode is Keys.Insert)
+        {
+            AddRow();
+            e.Handled = true;
+        }
+        else if (e.KeyCode is Keys.Delete && _grid.CurrentRow is { Index: >= 0 })
+        {
+            RemoveRow();
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>
+    /// Opens the capture dialog for whichever key column was clicked.
+    /// </summary>
+    /// <remarks>
+    /// Both single and double click, because the columns are read-only: a double click on a
+    /// read-only cell produces no edit, so without this the second click would appear to do
+    /// nothing at all.
+    /// </remarks>
+    private void OnCellClick(object? sender, DataGridViewCellEventArgs e)
+    {
+        if (e.RowIndex < 0 || e.RowIndex >= _rows.Count)
+        {
+            return;
+        }
+
+        if (e.ColumnIndex == 0)
+        {
+            CaptureInto(e.RowIndex, hotkey: true);
+        }
+        else if (e.ColumnIndex == 1)
+        {
+            CaptureInto(e.RowIndex, hotkey: false);
+        }
     }
 
     private static DataGridViewTextBoxColumn TextColumn(string property, string header, int width) =>
@@ -456,32 +525,32 @@ internal sealed class HotkeyEditorForm : Form
     }
 
     /// <summary>
-    /// Records a shortcut by having the operator press it, and writes it into the selected row.
+    /// Sets one of the two key columns for a row, by press or by typing.
     /// </summary>
     /// <remarks>
-    /// Hotkey dispatch is suppressed for the whole time the capture dialog is open, in a
-    /// <c>using</c> so it is restored even if the dialog throws. Without that, pressing a key in
-    /// order to record it would instead fire whatever that key is bound to - and most rows here
-    /// place orders. If no suppression is available the capture is refused outright rather than
-    /// run unprotected.
+    /// <para>
+    /// One method for both columns, because the difference between them is a single flag - which
+    /// vocabulary the value is in - and everything around it is identical: suppress dispatch,
+    /// forward intercepted presses, write back, revalidate. Two near-identical copies is how the
+    /// forwarding came to be wired into one of them and not the other.
+    /// </para>
+    /// <para>
+    /// Dispatch is suppressed for the whole time the dialog is open, in a <c>using</c> so it is
+    /// restored even if the dialog throws. Without that, pressing a key in order to record it
+    /// would instead fire whatever it is bound to - and most rows here place orders. Forwarding
+    /// matters equally: a chord this process already holds never reaches a focused window, so
+    /// without it the dialog would hang on the modifiers for exactly the keys already configured.
+    /// </para>
     /// </remarks>
-    private void OnCaptureKey(object? sender, EventArgs e)
+    private void CaptureInto(int index, bool hotkey)
     {
-        _grid.EndEdit();
-
-        if (_grid.CurrentRow is not { Index: >= 0 and var index } || index >= _rows.Count)
-        {
-            MessageBox.Show(this, "Select a row first.", "Capture shortcut", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return;
-        }
-
         if (_captureRegisteredPresses is null)
         {
             MessageBox.Show(
                 this,
-                "Capture is unavailable because hotkey dispatch cannot be suspended. Type the "
-                + "shortcut instead.",
-                "Capture shortcut",
+                "Capture is unavailable because hotkey dispatch cannot be suspended, so pressing a "
+                + "key here could fire its binding instead of recording it.",
+                AppInfo.ProductName,
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
 
@@ -491,11 +560,7 @@ internal sealed class HotkeyEditorForm : Form
         BindingRow row = _rows[index];
         string? captured;
 
-        // Forwarding is needed here as well as in hotkey capture, not just suppression. A chord
-        // already bound as a hotkey is intercepted by this process and never reaches the dialog as
-        // keyboard input, so pressing it here would hang on the modifiers forever - which is
-        // exactly what happens when the deck key and the SIM shortcut are meant to be the same.
-        using (var dialog = new KeyCaptureDialog(row.Send))
+        using (var dialog = new KeyCaptureDialog(hotkey ? row.Hotkey : row.Send, hotkey))
         using (_captureRegisteredPresses(dialog.AcceptCapturedGesture))
         {
             captured = dialog.ShowDialog(this) is DialogResult.OK ? dialog.CapturedExpression : null;
@@ -506,86 +571,72 @@ internal sealed class HotkeyEditorForm : Form
             return;
         }
 
-        row.Send = captured;
+        if (hotkey)
+        {
+            row.Hotkey = captured;
+        }
+        else
+        {
+            row.Send = captured;
 
-        // An Action and a Send are mutually exclusive, and the operator has just said which they
-        // want by pressing a key. Clearing the other is less surprising than saving successfully
-        // and then being told the row sets both.
-        row.Action = string.Empty;
+            // Action and Send are mutually exclusive, and choosing a shortcut says which is
+            // wanted. Clearing the other is less surprising than saving and then being told the
+            // row sets both.
+            row.Action = string.Empty;
+        }
 
         _rows.ResetItem(index);
         Revalidate();
     }
 
-    /// <summary>
-    /// Records the deck key for the selected row, from either delivery path.
-    /// </summary>
-    /// <remarks>
-    /// Two paths, because Windows splits them. A key this process already holds is delivered as
-    /// WM_HOTKEY to the bridge's own window and never reaches this dialog, so the bridge forwards
-    /// it. A key it does not hold was never intercepted and arrives as ordinary input the dialog
-    /// reads itself. Neither alone is sufficient: the first misses unbound keys, the second misses
-    /// exactly the keys already configured.
-    /// </remarks>
-    private void OnCaptureHotkey(object? sender, EventArgs e)
-    {
-        _grid.EndEdit();
-
-        if (_grid.CurrentRow is not { Index: >= 0 and var index } || index >= _rows.Count)
-        {
-            MessageBox.Show(this, "Select a row first.", "Capture hotkey", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return;
-        }
-
-        if (_captureRegisteredPresses is null)
-        {
-            MessageBox.Show(
-                this,
-                "Capture is unavailable because hotkey dispatch cannot be suspended. Type the key "
-                + "instead, for example F13 or Ctrl+Alt+F13.",
-                "Capture hotkey",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
-
-            return;
-        }
-
-        BindingRow row = _rows[index];
-        string? captured;
-
-        using (var dialog = new KeyCaptureDialog(row.Hotkey, hotkeyMode: true))
-        using (_captureRegisteredPresses(dialog.AcceptCapturedGesture))
-        {
-            captured = dialog.ShowDialog(this) is DialogResult.OK ? dialog.CapturedExpression : null;
-        }
-
-        if (captured is null)
-        {
-            return;
-        }
-
-        row.Hotkey = captured;
-        _rows.ResetItem(index);
-        Revalidate();
-    }
-
-    private void OnAddRow(object? sender, EventArgs e)
+    private void AddRow()
     {
         _rows.Add(new BindingRow());
         Revalidate();
 
-        // Land the caret in the new row's first cell, so adding a row and typing a key is one
-        // continuous motion rather than add-then-hunt-for-the-cell.
+        // Selects the new row without opening the capture dialog. Opening it here would mean a
+        // modal appears from an action that only asked for an empty row.
         if (_grid.Rows.Count > 0)
         {
-            _grid.CurrentCell = _grid.Rows[^1].Cells[0];
-            _grid.BeginEdit(selectAll: true);
+            _grid.CurrentCell = _grid.Rows[^1].Cells[3];
         }
     }
 
-    private void OnRemoveRow(object? sender, EventArgs e)
+    /// <summary>
+    /// Copies the selected row, which is how most rows after the first get made.
+    /// </summary>
+    /// <remarks>
+    /// A deck layout is largely the same shape repeated - same modifier, adjacent key, similar
+    /// label - so starting from a copy is less work than starting from blank, and it replaces the
+    /// Add-then-retype cycle the toolbar buttons encouraged.
+    /// </remarks>
+    private void DuplicateRow()
     {
-        if (_grid.CurrentRow is { IsNewRow: false, Index: >= 0 and var index } && index < _rows.Count)
+        if (_grid.CurrentRow is not { Index: >= 0 and var index } || index >= _rows.Count)
+        {
+            return;
+        }
+
+        BindingRow source = _rows[index];
+
+        _rows.Insert(index + 1, new BindingRow
+        {
+            // Deliberately not the hotkey: two rows on the same key is a duplicate the resolver
+            // would reject, and leaving it blank says plainly that this is the part to set.
+            Hotkey = string.Empty,
+            Send = source.Send,
+            Action = source.Action,
+            Label = source.Label,
+            Level2Index = source.Level2Index,
+        });
+
+        _grid.CurrentCell = _grid.Rows[index + 1].Cells[0];
+        Revalidate();
+    }
+
+    private void RemoveRow()
+    {
+        if (_grid.CurrentRow is { Index: >= 0 and var index } && index < _rows.Count)
         {
             _rows.RemoveAt(index);
             Revalidate();

@@ -15,6 +15,15 @@ indent_size = 2
 trim_trailing_whitespace = false
 
 [*.cs]
+# Dead code. Errors rather than suggestions because unused members are not a style question in
+# a codebase carrying this much explanatory comment: a private helper nobody calls still reads
+# as intentional, and its comment still describes behaviour the product no longer has. Two had
+# already accumulated - a constructor parameter that was assigned and never read, and a
+# formatter that was never called - and both were found by hand rather than by the build.
+dotnet_diagnostic.IDE0051.severity = error   # unused private member
+dotnet_diagnostic.IDE0052.severity = error   # private member written but never read
+dotnet_diagnostic.CS8321.severity = error    # unused local function
+
 # Namespaces / usings
 csharp_style_namespace_declarations = file_scoped:warning
 dotnet_sort_system_directives_first = true

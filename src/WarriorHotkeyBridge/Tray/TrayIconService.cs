@@ -244,11 +244,7 @@ internal sealed class TrayIconService : IDisposable
             return;
         }
 
-        var editor = new HotkeyEditorForm(
-            _bindings.Current,
-            _presets,
-            _hotkeys.SuppressDispatch,
-            _hotkeys.CaptureRegisteredPresses);
+        var editor = new HotkeyEditorForm(_bindings.Current, _presets, _hotkeys.CaptureRegisteredPresses);
         _editor = editor;
 
         editor.FormClosed += (_, _) =>

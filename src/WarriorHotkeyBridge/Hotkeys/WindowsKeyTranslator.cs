@@ -273,19 +273,27 @@ internal static class WindowsKeyTranslator
         string key = tokens[^1];
         bool shift = tokens.AsSpan(0, tokens.Length - 1).Contains("Shift");
 
+        // The key half never mentions modifiers - the prefix already lists them. Saying it in both
+        // places produced "Shift + Shift and 1", which reads as two Shifts.
         string plain = key switch
         {
-            ['D', 'i', 'g', 'i', 't', var d] => shift ? $"Shift and {d} - delivers '{ShiftedDigit(d)}'" : $"the {d} key",
-            ['K', 'e', 'y', var c] => shift ? $"Shift and {c}" : $"the {c} key",
+            ['D', 'i', 'g', 'i', 't', var d] => d.ToString(),
+            ['K', 'e', 'y', var c] => c.ToString(),
             ['N', 'u', 'm', 'p', 'a', 'd', var d] when char.IsAsciiDigit(d) => $"numpad {d}",
-            _ => $"the {key} key",
+            _ => key,
         };
 
         string modifiers = tokens.Length > 1
             ? string.Join(" + ", tokens[..^1]) + " + "
             : string.Empty;
 
-        return $"{modifiers}{plain}";
+        // Only for a shifted digit, where the character produced is genuinely surprising: a
+        // physical Shift+1 delivers '!', which is the whole reason capture exists.
+        string delivers = shift && key is ['D', 'i', 'g', 'i', 't', var digit]
+            ? $" - delivers '{ShiftedDigit(digit)}'"
+            : string.Empty;
+
+        return $"{modifiers}{plain}{delivers}";
     }
 
     /// <summary>What a US layout produces for Shift plus a digit.</summary>
