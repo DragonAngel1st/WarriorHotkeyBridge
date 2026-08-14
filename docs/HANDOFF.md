@@ -53,8 +53,9 @@ Go/Stop shortcuts and button art; hotkey editor with presets and key capture.
 
 **Verified against a live SIM session.** Real trades executed end to end in 26–47 ms.
 
-**Released:** only `v1.0.0` on GitHub. **v1.1.1 is built but NOT released** — deliberately, see §7.
-1.1.0 was never released either; the version was bumped rather than reinstalled over itself.
+**Released:** `v1.0.0` and `v1.1.1` on GitHub, the latter with the MSI attached and marked latest.
+1.1.0 was never released; the version was bumped to 1.1.1 rather than reinstalled over itself, which
+also sidesteps the same-version upgrade trap below. 1.1.1 is installed and signed off on locally.
 
 ## 4. Traps — read this before touching anything
 
@@ -200,22 +201,38 @@ v4–v7 all share, so moving to v7 later needs no source change.
 
 ## 7. Outstanding
 
-**Blocking the v1.1.1 release — needs the user:**
-- The user should confirm the redesigned editor is usable before a release is cut.
+**Nothing is blocking a release.** v1.1.1 is tagged and released with the MSI attached; the user
+signed off on the editor after running the installed 1.1.1 build.
 
-**No longer blocking — the user does these in the app.** Both presets are authored by the user
-through the editor's **Copy preset...** button, not written by an assistant:
-- **Ross's Sim Default** — the SIM's factory chords, assigned F13 upward.
-- **Pat's full-deck mapping** — 15-key deck. Only twelve F13–F24 exist, so three keys need
-  modifiers (`Ctrl+F13`…); key capture handles those.
+**Presets are the user's to author**, through the editor's **Copy preset...** button, not written by
+an assistant. This covers Ross's Sim Default and the user's own full-deck mapping. The 15-key deck
+has only twelve F13–F24 available, so three keys need modifiers (`Ctrl+F13`…); key capture handles
+those.
 
 **v1.2.0 — multiple Level 2 panels.** Currently a chord goes to the first panel in DOM order
 (`Level2Index` defaults to 0), which is deterministic but not predictable, since rearranging the
 layout changes which is index 0. The `Level2Index` column was removed from the editor for that
-reason. **The agreed approach is the SIM's own colour link**: a blue-linked Level 2 matches a
-blue-linked chart, and changing the ticker on one changes the other. That is the platform's own
-statement of which components belong together — reading intent rather than guessing at layout.
-Two SIM *pages* are already correctly refused as ambiguous; two *panels* in one page are not.
+reason. Two SIM *pages* are already correctly refused as ambiguous; two *panels* in one page are not.
+
+**The user's design, in their words: send to the panel matching the currently selected component's
+ticker — or the last selected component's ticker if nothing is selected right now — and use the
+SIM's own colour link between charts and components to establish which panel that is.**
+
+Both halves are the platform stating its own intent rather than the bridge guessing at layout. The
+colour link is the structural half: a blue-linked Level 2 matches a blue-linked chart, and changing
+the ticker on one changes the other. The selection-and-ticker rule is the half that decides *which*
+link group the operator means at the moment they press a key — which is the part index-in-DOM can
+never answer, because it does not change when the operator's attention does.
+
+Two things already known that this work will run into:
+- `flexlayout__tab_button--selected` is **per tabset** and there are 11 at once. Exactly one element
+  document-wide carries `flexlayout__tabset-selected`, on `flexlayout__tabset_tabbar_outer`. That is
+  the authoritative "this component receives the keyboard" signal — and therefore the starting point
+  for "currently selected".
+- "Last selected if none is selected now" needs state that survives between commands. There is no
+  such store today; `Level2Controller` is stateless per command by design. Whatever holds it must not
+  become a second source of truth that can disagree with the page — prefer re-reading the page and
+  falling back to a remembered ticker only when the page genuinely says nothing is selected.
 
 **User's decisions, untouched:**
 - `C:\Users\admin\.git` is a repo rooted at the **home directory** with zero commits, no remote and
