@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Extensions.Logging;
+using WarriorHotkeyBridge.Commands;
 using WarriorHotkeyBridge.Configuration;
 using WarriorHotkeyBridge.Diagnostics;
 using WarriorHotkeyBridge.Hotkeys;
@@ -21,6 +22,16 @@ internal sealed class TrayIconService : IDisposable
     /// Shell limit for a notification-area tooltip. Exceeding it throws, so text is truncated.
     /// </summary>
     private const int MaxTooltipLength = 63;
+
+    /// <summary>
+    /// The rehearsal the editor's Test button runs. Sends nothing, and raises the SIM window -
+    /// see <see cref="HotkeyAction.ActivatesWindow"/> for why the raising is not optional.
+    /// </summary>
+    private static readonly HotkeyAction TargetingTest = new()
+    {
+        Kind = HotkeyActionKind.Test,
+        Label = "from the hotkey editor",
+    };
 
     private readonly IBridgeStateService _state;
     private readonly IUiDispatcher _ui;
@@ -58,6 +69,7 @@ internal sealed class TrayIconService : IDisposable
     private readonly IUserConfigurationWriter _configurationWriter;
     private readonly IHotkeyPresetProvider _presets;
     private readonly GlobalHotkeyService _hotkeys;
+    private readonly CommandQueue _commands;
 
     /// <summary>The open editor, so a second click focuses it rather than opening another.</summary>
     private HotkeyEditorForm? _editor;
@@ -72,6 +84,7 @@ internal sealed class TrayIconService : IDisposable
         IUserConfigurationWriter configurationWriter,
         IHotkeyPresetProvider presets,
         GlobalHotkeyService hotkeys,
+        CommandQueue commands,
         TimeProvider time,
         ILogger<TrayIconService> logger)
     {
@@ -84,6 +97,7 @@ internal sealed class TrayIconService : IDisposable
         _configurationWriter = configurationWriter;
         _presets = presets;
         _hotkeys = hotkeys;
+        _commands = commands;
         _time = time;
         _logger = logger;
     }
@@ -244,7 +258,12 @@ internal sealed class TrayIconService : IDisposable
             return;
         }
 
-        var editor = new HotkeyEditorForm(_bindings.Current, _presets, _hotkeys.CaptureRegisteredPresses);
+        var editor = new HotkeyEditorForm(
+            _bindings.Current,
+            _presets,
+            _hotkeys.CaptureRegisteredPresses,
+            () => _commands.EnqueueAsync(TargetingTest, "the hotkey editor's Test button"));
+
         _editor = editor;
 
         editor.FormClosed += (_, _) =>

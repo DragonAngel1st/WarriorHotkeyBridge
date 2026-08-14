@@ -1,19 +1,32 @@
 using System.Diagnostics;
-using WarriorHotkeyBridge.Hotkeys;
 
 namespace WarriorHotkeyBridge.Models;
 
-/// <summary>One hotkey press, on its way through the queue.</summary>
+/// <summary>One command, on its way through the queue.</summary>
+/// <param name="Source">
+/// Where the command came from - the gesture display for a keypress, a short description for
+/// anything started from the user interface. Logging only; nothing branches on it.
+/// </param>
 /// <param name="ReceivedTimestamp">
 /// <see cref="Stopwatch.GetTimestamp"/> taken inside the window procedure, so measured latency
 /// covers everything from the moment Windows handed us the key.
 /// </param>
 internal sealed record CommandRequest(
-    HotkeyRegistration Registration,
+    HotkeyAction Action,
+    string Source,
     long ReceivedTimestamp,
     long QueuedTimestamp)
 {
-    public HotkeyAction Action => Registration.Action;
+    /// <summary>
+    /// Set when the caller wants the outcome back, not merely for the command to happen.
+    /// </summary>
+    /// <remarks>
+    /// This is what lets a window report the result of a command it started while the command
+    /// itself still goes through the one queue every hotkey uses. Calling the executor directly
+    /// instead would let, say, a targeting test overlap a trading command against the same page -
+    /// which is the exact race the single-consumer queue exists to prevent.
+    /// </remarks>
+    public TaskCompletionSource<CommandResult>? Completion { get; init; }
 }
 
 /// <summary>

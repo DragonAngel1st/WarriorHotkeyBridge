@@ -58,11 +58,25 @@ internal sealed class CommandDispatcher : BackgroundService
             {
                 _queue.OnDequeued();
 
-                CommandResult result = await _executor
-                    .ExecuteAsync(request, stoppingToken)
-                    .ConfigureAwait(false);
+                CommandResult result;
+
+                try
+                {
+                    result = await _executor
+                        .ExecuteAsync(request, stoppingToken)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    // Only reachable for a failure the executor does not already turn into a
+                    // result. Whoever is waiting has to learn of it here, because the loop is
+                    // about to end and nothing else will ever complete their request.
+                    request.Completion?.TrySetException(ex);
+                    throw;
+                }
 
                 Report(result);
+                request.Completion?.TrySetResult(result);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

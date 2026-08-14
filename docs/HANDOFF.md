@@ -3,7 +3,7 @@
 Written for a fresh assistant conversation with no prior context. Everything here was learned the
 expensive way; most of it is not visible from the code alone.
 
-**Last updated:** commit `350d3e6`, version 1.1.0, 327 tests passing.
+**Last updated:** version 1.1.1, 333 tests passing.
 
 ---
 
@@ -44,7 +44,7 @@ sent) and reports them differently.
 
 ## 3. Current state
 
-Working tree clean, local == remote, 14 commits, 327 tests, builds with warnings as errors.
+Working tree clean, local == remote, 333 tests, builds with warnings as errors.
 
 **Shipped and working:** hotkeys with reclaim-on-conflict retry; warm CDP connection with watchdog,
 zombie detection and sleep/resume recovery; single-round-trip Level 2 probe (~9 ms steady state);
@@ -53,8 +53,8 @@ Go/Stop shortcuts and button art; hotkey editor with presets and key capture.
 
 **Verified against a live SIM session.** Real trades executed end to end in 26–47 ms.
 
-**Released:** only `v1.0.0` on GitHub. **v1.1.0 is built and installed locally but NOT released** —
-deliberately, see §7.
+**Released:** only `v1.0.0` on GitHub. **v1.1.1 is built but NOT released** — deliberately, see §7.
+1.1.0 was never released either; the version was bumped rather than reinstalled over itself.
 
 ## 4. Traps — read this before touching anything
 
@@ -103,6 +103,24 @@ Bit twice: once in a `.csproj` describing `--debug`, once in the `.wxs` describi
 - A form focuses the first control in tab order on `Show`. Anything set up in the constructor that
   depends on focus must be redone in `OnShown`.
 - `DataGridView.AllowUserToAddRows` renders a permanent blank row that reads as a stray record.
+
+### The Action column is hidden, and hiding is not removing
+`Action` (Test / Diagnostics) is no longer shown in the editor: Test is a button in the toolbar and
+Diagnostics is a tray menu item, so the column was a step every operator had to understand purely
+in order to leave it alone. It is `Visible = false`, **not** deleted — deleting it would drop the
+value on save and silently disarm the Test and Diagnostics keys of anyone who already has them
+bound. A row whose only payload is a hidden Action renders its Sends cell as a grey
+`(Test - sends nothing)` via `CellFormatting`, so it does not read as half-finished.
+
+The Test button runs the same `HotkeyActionKind.Test` action through the same `CommandQueue`, not
+against the executor directly. A second consumer could re-target the page while a trading command
+was part-way through selecting a component on it. `CommandQueue.EnqueueAsync` carries a
+`TaskCompletionSource` so the outcome comes back to the window; the queue completes it as
+*Rejected* if the channel is already closed, or the caller would wait forever at shutdown.
+
+Its result is written into a label in the dialog, never a message box. A passing test ends with
+Chrome in front of the editor **by design**, so a modal raised at that moment would be either
+hidden behind Chrome or fighting it for the foreground.
 
 ### Registered hotkeys never reach a focused window
 Windows delivers a registered hotkey as `WM_HOTKEY` to the *registering* window. A dialog waiting on
@@ -164,7 +182,7 @@ legible and that the Save button actually disables.
 
 ```powershell
 dotnet build                              # warnings are errors
-dotnet test                               # 327 tests
+dotnet test                               # 333 tests
 pwsh -File installer/Build-Installer.ps1  # publish + MSI -> artifacts/installer/
 ```
 
@@ -182,11 +200,14 @@ v4–v7 all share, so moving to v7 later needs no source change.
 
 ## 7. Outstanding
 
-**Blocking the v1.1.0 release — needs the user:**
-- **Ross's Sim Default** — the SIM's factory chords and what each does. Will be assigned F13 upward.
-- **Pat's new full-deck mapping** — 15-key deck. Only twelve F13–F24 exist, so three keys need
-  modifiers (`Ctrl+F13`…). Capture handles those.
+**Blocking the v1.1.1 release — needs the user:**
 - The user should confirm the redesigned editor is usable before a release is cut.
+
+**No longer blocking — the user does these in the app.** Both presets are authored by the user
+through the editor's **Copy preset...** button, not written by an assistant:
+- **Ross's Sim Default** — the SIM's factory chords, assigned F13 upward.
+- **Pat's full-deck mapping** — 15-key deck. Only twelve F13–F24 exist, so three keys need
+  modifiers (`Ctrl+F13`…); key capture handles those.
 
 **v1.2.0 — multiple Level 2 panels.** Currently a chord goes to the first panel in DOM order
 (`Level2Index` defaults to 0), which is deterministic but not predictable, since rearranging the
@@ -197,10 +218,11 @@ statement of which components belong together — reading intent rather than gue
 Two SIM *pages* are already correctly refused as ambiguous; two *panels* in one page are not.
 
 **User's decisions, untouched:**
-- `C:\Users\admin\.git` is a repo rooted at the **home directory** with zero commits and no remote.
-  It has `.ssh`, `.git-credentials`, `atlas_deploy_key` and `certificates/` tracked-but-unignored.
-  One `git add -A` from publishing private keys. Flagged repeatedly; the user's call. **Do not touch
-  it without being asked.**
+- `C:\Users\admin\.git` is a repo rooted at the **home directory** with zero commits, no remote and
+  an empty index — so nothing is tracked *yet*. There is no `.gitignore` and `.git/info/exclude` is
+  the stock template, so `.ssh`, `.git-credentials`, `atlas_deploy_key` and `certificates/` are all
+  unignored: one `git add -A` run from that directory would stage private keys. Flagged repeatedly;
+  the user's call. **Do not touch it without being asked.**
 - Code signing. The MSI is unsigned, so SmartScreen warns. Needs a paid certificate — a spend
   decision. The build accepts a signing step without restructuring.
 

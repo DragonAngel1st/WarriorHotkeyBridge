@@ -1,4 +1,5 @@
 using WarriorHotkeyBridge.Configuration;
+using WarriorHotkeyBridge.Models;
 using WarriorHotkeyBridge.Tray;
 
 namespace WarriorHotkeyBridge.Tests;
@@ -68,6 +69,81 @@ public class HotkeyEditorFormTests
         // it is not applyable.
         Assert.Single(form.Result);
     });
+
+    /// <summary>
+    /// The Action column is hidden, not removed - so a key already configured as Test or
+    /// Diagnostics is still there to be saved.
+    /// </summary>
+    /// <remarks>
+    /// The distinction is the whole point of hiding it. Dropping the column would silently
+    /// disarm those keys the next time the operator opened the editor and pressed Save, and
+    /// nothing in the dialog would have said so.
+    /// </remarks>
+    [Fact]
+    public void HiddenActionColumnStillCarriesItsValue() => OnStaThread(() =>
+    {
+        using var form = new HotkeyEditorForm(
+            new Dictionary<string, HotkeyBindingConfig> { ["F24"] = new() { Action = "Diagnostics" } },
+            new StubPresets([]));
+
+        DataGridView grid = FindGrid(form);
+
+        Assert.False(grid.Columns[2].Visible);
+        Assert.Equal("Diagnostics", Assert.Contains("F24", form.Result).Action);
+    });
+
+    /// <summary>
+    /// Both key columns are read-only so that clicking them can open capture. A read-only cell
+    /// reads as one that cannot be changed at all, so the hint is what makes them usable.
+    /// </summary>
+    [Fact]
+    public void KeyColumnsExplainThemselvesOnHover() => OnStaThread(() =>
+    {
+        using var form = new HotkeyEditorForm(
+            new Dictionary<string, HotkeyBindingConfig>(),
+            new StubPresets([]));
+
+        DataGridView grid = FindGrid(form);
+
+        Assert.Contains("Click inside this cell", grid.Columns[0].ToolTipText, StringComparison.Ordinal);
+        Assert.Contains("Click inside this cell", grid.Columns[1].ToolTipText, StringComparison.Ordinal);
+        Assert.Contains("Level 2", grid.Columns[1].ToolTipText, StringComparison.Ordinal);
+    });
+
+    /// <summary>
+    /// Constructed without a way to run a command - as the tests do - the Test button is present
+    /// but disabled, rather than absent. A dialog that changes shape depending on how it was
+    /// built is one whose screenshots stop meaning anything.
+    /// </summary>
+    [Fact]
+    public void TestButtonIsDisabledWithNothingToRunIt() => OnStaThread(() =>
+    {
+        using var withoutRunner = new HotkeyEditorForm(
+            new Dictionary<string, HotkeyBindingConfig>(),
+            new StubPresets([]));
+
+        Assert.False(FindButton(withoutRunner, "Test targeting").Enabled);
+
+        using var withRunner = new HotkeyEditorForm(
+            new Dictionary<string, HotkeyBindingConfig>(),
+            new StubPresets([]),
+            captureRegisteredPresses: null,
+            runTargetingTest: () => Task.FromResult(new CommandResult
+            {
+                Outcome = CommandOutcome.Succeeded,
+                ActionDescription = "Test",
+            }));
+
+        Assert.True(FindButton(withRunner, "Test targeting").Enabled);
+    });
+
+    private static DataGridView FindGrid(Control root) => Descendants(root).OfType<DataGridView>().Single();
+
+    private static Button FindButton(Control root, string text) =>
+        Descendants(root).OfType<Button>().Single(b => b.Text == text);
+
+    private static IEnumerable<Control> Descendants(Control root) =>
+        root.Controls.Cast<Control>().SelectMany(c => new[] { c }.Concat(Descendants(c)));
 
     private static void OnStaThread(Action action)
     {

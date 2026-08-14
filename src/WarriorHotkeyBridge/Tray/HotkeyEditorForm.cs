@@ -2,6 +2,7 @@ using System.ComponentModel;
 using WarriorHotkeyBridge.Configuration;
 using WarriorHotkeyBridge.Diagnostics;
 using WarriorHotkeyBridge.Hotkeys;
+using WarriorHotkeyBridge.Models;
 
 namespace WarriorHotkeyBridge.Tray;
 
@@ -15,14 +16,43 @@ namespace WarriorHotkeyBridge.Tray;
 /// rows, each a key and what it sends.
 /// </para>
 /// <para>
-/// The hotkey is typed rather than captured by pressing it, which looks like a missed opportunity
-/// and is not. The bridge holds F13-F24 globally the entire time this dialog is open, so pressing
-/// one would fire the binding rather than record it - the dialog would be competing with the very
-/// registration it exists to edit.
+/// Keys are set by clicking the cell, which opens a capture dialog that accepts either a press or
+/// typing. The press half is the part with teeth: the bridge holds F13-F24 globally the entire
+/// time this dialog is open, so capture only works because dispatch is suspended and intercepted
+/// chords are forwarded into the dialog. See <see cref="CaptureInto"/>.
 /// </para>
 /// </remarks>
 internal sealed class HotkeyEditorForm : Form
 {
+    /// <summary>
+    /// How long the targeting test is given before the dialog stops waiting on it.
+    /// </summary>
+    /// <remarks>
+    /// Far longer than a test takes - a live one measures in tens of milliseconds - because this
+    /// is not a latency budget. It exists so the button cannot be left saying "Testing..."
+    /// forever if the command consumer stops before reaching the request, which is what happens
+    /// when the bridge shuts down with the editor still open.
+    /// </remarks>
+    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Hover text for the two key columns.
+    /// </summary>
+    /// <remarks>
+    /// Long, and deliberately so. Both columns are read-only precisely so that clicking them can
+    /// open capture instead of swallowing keystrokes in place - but a read-only cell looks like
+    /// one that cannot be changed at all, so without this the gesture is unguessable.
+    /// </remarks>
+    private const string HotkeyColumnHint =
+        "Click inside this cell, then press the key you want to record - or type it.\r\n"
+        + "This is the key the bridge listens for while you are working somewhere else: F13 to "
+        + "F24, on their own or with Ctrl, Alt, Shift or Win. It is what your Stream Deck sends.";
+
+    private const string SendColumnHint =
+        "Click inside this cell, then press the key sequence you want recorded - or type it.\r\n"
+        + "This is what gets delivered into the Level 2 & Order Entry panel when the hotkey is "
+        + "pressed. What it then DOES is set in Warrior SIM's own hotkey settings, not here.";
+
     private readonly IHotkeyPresetProvider _presets;
     private readonly BindingList<BindingRow> _rows = [];
     private readonly DataGridView _grid;
@@ -31,16 +61,20 @@ internal sealed class HotkeyEditorForm : Form
     private readonly Button _save;
     private readonly Label _summary;
     private Label _help = null!;
+    private Label _testResult = null!;
     private Button _saveAsPreset = null!;
+    private Button _test = null!;
     private readonly ToolTip _tooltip = new() { AutoPopDelay = 20000, InitialDelay = 400, ReshowDelay = 200 };
     private readonly Func<Action<HotkeyGesture>, IDisposable>? _captureRegisteredPresses;
+    private readonly Func<Task<CommandResult>>? _runTargetingTest;
 
     private bool _suppressValidation;
 
     public HotkeyEditorForm(
         IReadOnlyDictionary<string, HotkeyBindingConfig> current,
         IHotkeyPresetProvider presets,
-        Func<Action<HotkeyGesture>, IDisposable>? captureRegisteredPresses = null)
+        Func<Action<HotkeyGesture>, IDisposable>? captureRegisteredPresses = null,
+        Func<Task<CommandResult>>? runTargetingTest = null)
     {
         ArgumentNullException.ThrowIfNull(current);
         _presets = presets;
@@ -49,6 +83,11 @@ internal sealed class HotkeyEditorForm : Form
         // application it is always supplied; the capture handlers refuse to run without it rather
         // than capturing while the keys are live.
         _captureRegisteredPresses = captureRegisteredPresses;
+
+        // Likewise optional, and likewise always supplied in the application. Without it the Test
+        // button is disabled rather than absent, so the dialog does not change shape depending on
+        // how it was constructed.
+        _runTargetingTest = runTargetingTest;
 
         Text = $"{AppInfo.ProductName} - Hotkeys";
         StartPosition = FormStartPosition.CenterScreen;
@@ -87,10 +126,19 @@ internal sealed class HotkeyEditorForm : Form
             Margin = new Padding(0, 0, 0, 10),
             Text =
                 "Each row sends a keyboard shortcut into the Level 2 & Order Entry panel. What that "
-                + "shortcut DOES is set in Warrior SIM's own hotkey settings - this only delivers it. "
-                + "Leave the Sends column empty and pick an Action for a key that sends nothing.\r\n"
+                + "shortcut DOES is set in Warrior SIM's own hotkey settings - this only delivers it.\r\n"
                 + "Click a Hotkey or Sends cell to set it - press the key, or type it. "
                 + "Right-click a row to add, duplicate or remove it.",
+        };
+
+        // Hidden until a test has run. A permanently visible empty line between the toolbar and
+        // the grid would read as a field waiting to be filled in.
+        _testResult = new Label
+        {
+            AutoSize = true,
+            UseMnemonic = false,
+            Visible = false,
+            Margin = new Padding(0, 0, 0, 8),
         };
 
         var loadPreset = new Button { Text = "Load", AutoSize = true, Margin = new Padding(6, 0, 0, 0) };
@@ -105,6 +153,25 @@ internal sealed class HotkeyEditorForm : Form
             _saveAsPreset,
             "Copy the hotkeys currently shown here into a new preset file, under a name you choose.\r\n"
             + "This does not change your active hotkeys - use Save & Apply for that.");
+
+        // Replaces the Action column's Test entry. Everyone needs to answer "is it aimed at the
+        // right place?", and making that a binding meant spending one of twelve deck keys on it
+        // and understanding a column that exists for nothing else.
+        _test = new Button
+        {
+            Text = "Test targeting",
+            AutoSize = true,
+            Margin = new Padding(24, 0, 0, 0),
+            Enabled = _runTargetingTest is not null,
+        };
+
+        _test.Click += OnTestTargeting;
+
+        _tooltip.SetToolTip(
+            _test,
+            "Runs everything a trading key does except the keystroke: finds the Warrior SIM page,\r\n"
+            + "selects its Level 2 & Order Entry panel, and brings the Chrome window to the front.\r\n"
+            + "Nothing is sent, so this is always safe to press.");
 
         // Wrapping ON here, unlike the OK/Cancel panel. That one had to stay on one line because a
         // stacked Save-above-Cancel looks broken; a toolbar spilling onto a second row is ordinary,
@@ -125,6 +192,7 @@ internal sealed class HotkeyEditorForm : Form
             _presetPicker,
             loadPreset,
             _saveAsPreset,
+            _test,
         ]);
 
         var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, AutoSize = true, Padding = new Padding(12, 4, 12, 4) };
@@ -157,39 +225,45 @@ internal sealed class HotkeyEditorForm : Form
             Dock = DockStyle.Fill,
             Padding = new Padding(12),
             ColumnCount = 1,
-            RowCount = 5,
+            RowCount = 6,
         };
 
         host.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         host.RowStyles.Add(new RowStyle(SizeType.AutoSize));   // help
         host.RowStyles.Add(new RowStyle(SizeType.AutoSize));   // toolbar
+        host.RowStyles.Add(new RowStyle(SizeType.AutoSize));   // test result
         host.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); // grid
         host.RowStyles.Add(new RowStyle(SizeType.AutoSize));   // problems
         host.RowStyles.Add(new RowStyle(SizeType.AutoSize));   // buttons
 
         host.Controls.Add(_help, 0, 0);
         host.Controls.Add(toolbar, 0, 1);
-        host.Controls.Add(_grid, 0, 2);
-        host.Controls.Add(_problems, 0, 3);
-        host.Controls.Add(bottom, 0, 4);
+        host.Controls.Add(_testResult, 0, 2);
+        host.Controls.Add(_grid, 0, 3);
+        host.Controls.Add(_problems, 0, 4);
+        host.Controls.Add(bottom, 0, 5);
 
         // An AutoSize label only wraps if something bounds its width. Without this it lays out as
         // one enormously wide line and the form simply clips it, which is what the fixed height
         // was hiding.
-        host.Resize += (_, _) => ConstrainHelpWidth(host);
-        ConstrainHelpWidth(host);
+        host.Resize += (_, _) => ConstrainLabelWidths(host);
+        ConstrainLabelWidths(host);
 
         CancelButton = cancel;
         return host;
     }
 
-    private static void ConstrainHelpWidth(TableLayoutPanel host)
+    /// <remarks>
+    /// Both wrapping labels, not just the help text. The test result carries a failure reason
+    /// straight from the executor, which is the longer of the two and the one it matters most to
+    /// be able to read.
+    /// </remarks>
+    private void ConstrainLabelWidths(TableLayoutPanel host)
     {
-        if (host.Controls.Count > 0 && host.Controls[0] is Label help)
-        {
-            int available = host.ClientSize.Width - host.Padding.Horizontal;
-            help.MaximumSize = new Size(Math.Max(120, available), 0);
-        }
+        var bound = new Size(Math.Max(120, host.ClientSize.Width - host.Padding.Horizontal), 0);
+
+        _help.MaximumSize = bound;
+        _testResult.MaximumSize = bound;
     }
 
     private DataGridView BuildGrid()
@@ -228,6 +302,13 @@ internal sealed class HotkeyEditorForm : Form
 
         grid.Columns[3].AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
 
+        // Hidden rather than removed, and hidden rather than left in place. Both named actions
+        // are reachable without it now - Test is the button above, Diagnostics is a tray menu
+        // item - so the column was a step every operator had to understand in order to leave it
+        // alone. Dropping the column outright would instead drop the value on save, silently
+        // disarming the Test and Diagnostics keys of anyone who already has them configured.
+        grid.Columns[2].Visible = false;
+
         // The two key columns are set through the capture dialog, never typed in place. Editing
         // them here would mean intercepting keystrokes inside a grid cell, and a cell that
         // swallows every key while looking like an ordinary text box is a worse thing to hand
@@ -237,6 +318,18 @@ internal sealed class HotkeyEditorForm : Form
         grid.Columns[1].ReadOnly = true;
         grid.Columns[0].DefaultCellStyle.BackColor = Color.FromArgb(248, 250, 252);
         grid.Columns[1].DefaultCellStyle.BackColor = Color.FromArgb(248, 250, 252);
+
+        grid.Columns[0].ToolTipText = HotkeyColumnHint;
+        grid.Columns[1].ToolTipText = SendColumnHint;
+
+        // Per cell as well as per header, because the header is not where anyone looks when they
+        // are trying to work out why a cell will not accept typing. The event fires only for a
+        // data-bound or virtual grid; this one is data-bound.
+        grid.CellToolTipTextNeeded += OnCellToolTipTextNeeded;
+
+        // A row whose only payload is a now-hidden Action would show an empty Sends cell and read
+        // as half-finished. Display only - nothing is written back.
+        grid.CellFormatting += OnFormatCell;
 
         grid.CellClick += OnCellClick;
         grid.CellDoubleClick += OnCellClick;
@@ -325,6 +418,36 @@ internal sealed class HotkeyEditorForm : Form
         {
             CaptureInto(e.RowIndex, hotkey: false);
         }
+    }
+
+    private static void OnCellToolTipTextNeeded(object? sender, DataGridViewCellToolTipTextNeededEventArgs e) =>
+        e.ToolTipText = e.ColumnIndex switch
+        {
+            0 => HotkeyColumnHint,
+            1 => SendColumnHint,
+            _ => e.ToolTipText,
+        };
+
+    /// <summary>
+    /// Says what a row with no Send is for, now that the Action column is hidden.
+    /// </summary>
+    private void OnFormatCell(object? sender, DataGridViewCellFormattingEventArgs e)
+    {
+        if (e.ColumnIndex != 1 || e.RowIndex < 0 || e.RowIndex >= _rows.Count)
+        {
+            return;
+        }
+
+        BindingRow row = _rows[e.RowIndex];
+
+        if (!string.IsNullOrWhiteSpace(row.Send) || string.IsNullOrWhiteSpace(row.Action))
+        {
+            return;
+        }
+
+        e.Value = $"({row.Action.Trim()} - sends nothing)";
+        e.CellStyle.ForeColor = Color.FromArgb(110, 110, 110);
+        e.FormattingApplied = true;
     }
 
     private static DataGridViewTextBoxColumn TextColumn(string property, string header, int width) =>
@@ -589,6 +712,92 @@ internal sealed class HotkeyEditorForm : Form
         Revalidate();
     }
 
+    /// <summary>
+    /// Rehearses everything a trading key does except the keystroke, and reports what happened.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The result is written into the dialog rather than shown in a message box, because a
+    /// successful test ends with Chrome in front of this window by design. A modal raised at that
+    /// moment would either be hidden behind Chrome or would have to fight it for the foreground,
+    /// and the operator would be reading a dialog instead of seeing the thing it is describing.
+    /// The line is still here when they come back.
+    /// </para>
+    /// <para>
+    /// <c>async void</c> because this is an event handler; nothing can await it. Every failure is
+    /// caught below rather than escaping onto the message loop.
+    /// </para>
+    /// </remarks>
+    private async void OnTestTargeting(object? sender, EventArgs e)
+    {
+        if (_runTargetingTest is null)
+        {
+            return;
+        }
+
+        // Disabled for the duration. The command is queued and runs on one consumer, so a second
+        // press would queue a second test behind the first rather than achieving anything sooner.
+        _test.Enabled = false;
+        ShowTestResult("Testing...", Color.FromArgb(70, 70, 70));
+
+        try
+        {
+            CommandResult result = await _runTargetingTest().WaitAsync(TestTimeout);
+
+            if (result.Outcome is CommandOutcome.Succeeded)
+            {
+                // The total only. The full breakdown includes a dispatch figure that is always
+                // zero here, which reads as a stage that failed rather than one never attempted;
+                // the log has the breakdown for anyone chasing latency.
+                ShowTestResult(
+                    "Targeting works. The Warrior SIM page was found, its Level 2 & Order Entry panel "
+                    + "was selected, and the Chrome window was brought to the front in "
+                    + $"{result.Timings.Total.TotalMilliseconds:0}ms. Nothing was sent.",
+                    Color.FromArgb(20, 110, 60));
+
+                return;
+            }
+
+            ShowTestResult(
+                "Targeting failed, so a hotkey would not have reached the SIM: "
+                + (result.FailureReason ?? "no reason was reported."),
+                Color.FromArgb(150, 35, 35));
+        }
+        catch (TimeoutException)
+        {
+            ShowTestResult(
+                $"The test did not finish within {TestTimeout.TotalSeconds:0} seconds. The bridge may be "
+                + "shutting down; otherwise check the log.",
+                Color.FromArgb(150, 35, 35));
+        }
+        catch (Exception ex)
+        {
+            // A resilience boundary, as elsewhere in the tray: a failed test must leave the
+            // dialog usable rather than take the message loop down with it.
+            ShowTestResult($"The test could not be run: {ex.Message}", Color.FromArgb(150, 35, 35));
+        }
+        finally
+        {
+            // Guarded because the dialog can be closed while a test is in flight.
+            if (!IsDisposed)
+            {
+                _test.Enabled = true;
+            }
+        }
+    }
+
+    private void ShowTestResult(string text, Color colour)
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        _testResult.Text = text;
+        _testResult.ForeColor = colour;
+        _testResult.Visible = true;
+    }
+
     private void AddRow()
     {
         _rows.Add(new BindingRow());
@@ -752,8 +961,8 @@ internal sealed class HotkeyEditorForm : Form
         DialogResult confirm = MessageBox.Show(
             this,
             $"Apply {Result.Count} hotkey(s), of which {dispatching} send a shortcut to the SIM?\n\n"
-            + "These keys become live immediately. Press F23 (Test) afterwards to confirm targeting "
-            + "without sending anything.",
+            + "These keys become live immediately. Use Test targeting afterwards to confirm the SIM "
+            + "is being aimed at, without sending anything.",
             "Apply hotkeys",
             MessageBoxButtons.OKCancel,
             MessageBoxIcon.Warning,

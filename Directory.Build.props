@@ -7,7 +7,7 @@
     Nothing else in the repository should hard-code a version number.
   -->
   <PropertyGroup>
-    <VersionPrefix>1.1.0</VersionPrefix>
+    <VersionPrefix>1.1.1</VersionPrefix>
     <Product>Warrior Hotkey Bridge</Product>
     <Authors>Patrick Miron</Authors>
     <Copyright>Copyright Â© $([System.DateTime]::Now.Year) Patrick Miron</Copyright>
