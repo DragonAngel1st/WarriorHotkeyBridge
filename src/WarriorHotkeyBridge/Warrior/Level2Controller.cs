@@ -48,6 +48,14 @@ internal sealed class Level2Controller : ILevel2Controller
           const pageTitle = document.title;
           const pageVisible = document.visibilityState === 'visible';
 
+          // Which DOCUMENT will receive the chord. The SIM's charts are TradingView widgets in
+          // iframes, and clicking inside one moves browser focus to that frame - after which
+          // every dispatched key goes there and Level 2 never sees it, no matter which FlexLayout
+          // component is selected. Cheap to read and needed on the same round trip as everything
+          // else, so it travels with the Level 2 answer rather than costing a second probe.
+          const focused = document.activeElement;
+          const focusInFrame = !!(focused && focused.tagName === 'IFRAME');
+
           for (const selector of selectors) {
             let nodes;
             try {
@@ -80,7 +88,7 @@ internal sealed class Level2Controller : ILevel2Controller
             }
 
             if (index >= matched.length) {
-              return { status: 'ambiguous', pageTitle, pageVisible, selector, count: matched.length };
+              return { status: 'ambiguous', pageTitle, pageVisible, focusInFrame, selector, count: matched.length };
             }
 
             const el = matched[index];
@@ -146,6 +154,7 @@ internal sealed class Level2Controller : ILevel2Controller
               status: 'found',
               pageTitle,
               pageVisible,
+              focusInFrame,
               selector,
               count: matched.length,
               hasTabBar: tabBar !== null,
@@ -162,8 +171,8 @@ internal sealed class Level2Controller : ILevel2Controller
           }
 
           return nearMiss
-            ? { status: 'textMismatch', pageTitle, pageVisible, selector: nearMiss.selector, sample: nearMiss.sample }
-            : { status: 'notFound', pageTitle, pageVisible };
+            ? { status: 'textMismatch', pageTitle, pageVisible, focusInFrame, selector: nearMiss.selector, sample: nearMiss.sample }
+            : { status: 'notFound', pageTitle, pageVisible, focusInFrame };
         }
         """;
 
@@ -223,6 +232,7 @@ internal sealed class Level2Controller : ILevel2Controller
                     MatchedSelector = probe.Selector,
                     PageTitle = probe.PageTitle,
                     PageVisible = probe.PageVisible,
+                    FocusTrappedInFrame = probe.FocusInFrame,
                     MatchCount = probe.Count,
                     HasTabBar = probe.HasTabBar,
                     HasContentChild = probe.HasContentChild,
@@ -239,6 +249,7 @@ internal sealed class Level2Controller : ILevel2Controller
                     MatchedSelector = probe.Selector,
                     PageTitle = probe.PageTitle,
                     PageVisible = probe.PageVisible,
+                    FocusTrappedInFrame = probe.FocusInFrame,
                     MatchCount = probe.Count,
                     Reason = $"Binding targets Level 2 panel #{index} but only {probe.Count} panel(s) matched.",
                 };
@@ -260,6 +271,7 @@ internal sealed class Level2Controller : ILevel2Controller
                     Status = Level2Status.NotFound,
                     PageTitle = probe.PageTitle,
                     PageVisible = probe.PageVisible,
+                    FocusTrappedInFrame = probe.FocusInFrame,
                     Reason = $"'{probe.Selector}' matched an element that does not contain "
                         + $"\"{_options.Level2TabText}\".",
                 };
@@ -270,6 +282,7 @@ internal sealed class Level2Controller : ILevel2Controller
                     Status = Level2Status.NotFound,
                     PageTitle = probe.PageTitle,
                     PageVisible = probe.PageVisible,
+                    FocusTrappedInFrame = probe.FocusInFrame,
                     Reason = "No element matched any configured Level 2 selector "
                         + $"({string.Join(", ", _options.EffectiveLevel2Selectors)}).",
                 };
@@ -298,6 +311,8 @@ internal sealed class Level2Controller : ILevel2Controller
         public bool PageVisible { get; set; }
 
         public bool HasContentChild { get; set; }
+
+        public bool FocusInFrame { get; set; }
 
         public bool? ClickTargetOnTop { get; set; }
 
@@ -399,13 +414,66 @@ internal sealed class Level2Controller : ILevel2Controller
         return $"Could not select the Level 2 tab: {first}";
     }
 
+    /// <summary>
+    /// Returns keyboard focus from a child frame to the page itself.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Blurring the frame element is deliberately the whole of it. Focus lands back on the page's
+    /// own body, which is the state every working dispatch was measured in, and from there the SIM
+    /// routes the chord by its selected component - which the caller has already established is
+    /// Level 2. Focusing something inside the panel instead would mean picking an element in a
+    /// component made mostly of order controls, to gain nothing.
+    /// </para>
+    /// <para>
+    /// Returns the tag now holding focus so the caller can verify rather than assume, in keeping
+    /// with the rest of this class: nothing here trusts an action to have worked.
+    /// </para>
+    /// </remarks>
+    private const string ReturnFocusScript = """
+        () => {
+          const focused = document.activeElement;
+
+          if (focused && focused.tagName === 'IFRAME' && typeof focused.blur === 'function') {
+            focused.blur();
+          }
+
+          const now = document.activeElement;
+          return (now && now.tagName || 'none').toLowerCase();
+        }
+        """;
+
     public async Task<Level2Result> EnsureSelectedAsync(IPage page, int index, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(page);
+
         Level2Result located = await LocateAsync(page, index, cancellationToken).ConfigureAwait(false);
 
-        if (located.Status is Level2Status.NotFound or Level2Status.Ambiguous || located.IsReady)
+        if (located.Status is Level2Status.NotFound or Level2Status.Ambiguous)
         {
             return located;
+        }
+
+        // Focus before selection, and before the IsReady shortcut. A page can be perfectly ready
+        // by every other measure while the chord would still be delivered to a chart's iframe,
+        // which is exactly the case that made this necessary - so returning early on IsReady
+        // without checking focus is the bug, not an optimisation.
+        if (located.FocusTrappedInFrame)
+        {
+            located = await ReturnFocusToPageAsync(page, index, located, cancellationToken).ConfigureAwait(false);
+
+            // RefusedIfFocusTrapped, not a bare return: the re-probe can legitimately come back
+            // Ready with focus still in the frame, and that combination is the bug itself - the
+            // command path would see IsReady and dispatch into the chart.
+            if (located.Status is Level2Status.NotFound or Level2Status.Ambiguous || located.FocusTrappedInFrame)
+            {
+                return located.RefusedIfFocusTrapped();
+            }
+        }
+
+        if (located.IsReady)
+        {
+            return located.RefusedIfFocusTrapped();
         }
 
         // Level 2 exists but has no tab bar. This is the expected shape when the panel has been
@@ -415,12 +483,12 @@ internal sealed class Level2Controller : ILevel2Controller
         {
             _logger.Level2NoTabBar();
 
-            return located with
+            return (located with
             {
                 Status = Level2Status.Ready,
                 IsSelected = true,
                 Reason = "Level 2 has no FlexLayout tab bar (popped out); selection is not applicable.",
-            };
+            }).RefusedIfFocusTrapped();
         }
 
         // Text-filtered before indexing, matching the probe exactly. Without the filter, Nth
@@ -473,7 +541,46 @@ internal sealed class Level2Controller : ILevel2Controller
             };
         }
 
-        return verified;
+        return verified.RefusedIfFocusTrapped();
     }
 
+    /// <summary>
+    /// Blurs the focused frame and re-probes, so the caller sees measured state rather than hope.
+    /// </summary>
+    /// <remarks>
+    /// Failure is reported as <see cref="Level2Status.Found"/> with a reason, which is how a
+    /// blocked tab click reports too: not ready, so the command path refuses and sends nothing.
+    /// Dispatching anyway would put a trading chord into whatever holds focus, and the whole
+    /// reason this method exists is that the thing holding focus was a chart.
+    /// </remarks>
+    private async Task<Level2Result> ReturnFocusToPageAsync(
+        IPage page,
+        int index,
+        Level2Result located,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            string holder = await page
+                .EvaluateAsync<string>(ReturnFocusScript)
+                .WaitAsync(_options.ProbeTimeout, cancellationToken)
+                .ConfigureAwait(false);
+
+            _logger.Level2FocusReturned(holder);
+        }
+        catch (Exception ex) when (ex is PlaywrightException or TimeoutException)
+        {
+            return located with
+            {
+                Status = Level2Status.Found,
+                Reason = $"Keyboard focus is inside a chart frame and could not be returned to the "
+                    + $"page, so the shortcut would have been typed into the chart: {ex.Message}",
+            };
+        }
+
+        // Re-probed rather than trusting the blur, exactly as the tab click is. If focus is still
+        // in the frame the result carries it, and every return path out of EnsureSelectedAsync
+        // runs it through RefusedIfFocusTrapped.
+        return await LocateAsync(page, index, cancellationToken).ConfigureAwait(false);
+    }
 }

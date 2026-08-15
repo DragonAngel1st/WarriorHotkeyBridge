@@ -204,11 +204,26 @@ internal static partial class BridgeLog
     [LoggerMessage(EventId = 701, Level = LogLevel.Debug, Message = "[LEVEL2] '{Selector}' matched tabs but none contain \"{Expected}\" (e.g. {Found}); no Level 2 on this page.")]
     public static partial void Level2TextMismatch(this ILogger logger, string selector, string expected, string found);
 
-    [LoggerMessage(EventId = 702, Level = LogLevel.Debug, Message = "[LEVEL2] Selected the Level 2 tab matched by '{Selector}' ({Mode} click).")]
+    /// <remarks>
+    /// Information rather than Debug: this is the bridge changing what the operator's trading
+    /// screen is pointing at, and it happens on the command path. When a chord went astray, the
+    /// log could not say whether targeting had done anything at all - the one fact needed to
+    /// diagnose it was the one being written at a level nobody runs.
+    /// </remarks>
+    [LoggerMessage(EventId = 702, Level = LogLevel.Information, Message = "[LEVEL2] Selected the Level 2 tab matched by '{Selector}' ({Mode} click).")]
     public static partial void Level2Selecting(this ILogger logger, string selector, string mode);
 
-    [LoggerMessage(EventId = 703, Level = LogLevel.Debug, Message = "[LEVEL2] No FlexLayout tab bar; treating Level 2 as selected (popped-out layout).")]
+    /// <inheritdoc cref="Level2Selecting"/>
+    [LoggerMessage(EventId = 703, Level = LogLevel.Information, Message = "[LEVEL2] No FlexLayout tab bar; treating Level 2 as selected (popped-out layout).")]
     public static partial void Level2NoTabBar(this ILogger logger);
+
+    /// <remarks>
+    /// Worth a line every time. It records that a chord was about to be delivered into a chart's
+    /// iframe and was not - which is invisible from the outside, because the successful outcome
+    /// looks exactly like an ordinary press.
+    /// </remarks>
+    [LoggerMessage(EventId = 706, Level = LogLevel.Information, Message = "[LEVEL2] Keyboard focus was inside a chart frame; returned it to the page (now on <{Holder}>).")]
+    public static partial void Level2FocusReturned(this ILogger logger, string holder);
 
     [LoggerMessage(EventId = 704, Level = LogLevel.Information, Message = "[LEVEL2] Ready via '{Selector}' (selected={Selected}, panels={Panels}).")]
     public static partial void Level2Ready(this ILogger logger, string selector, bool selected, int panels);
@@ -219,7 +234,13 @@ internal static partial class BridgeLog
     [LoggerMessage(EventId = 800, Level = LogLevel.Debug, Message = "[QUEUE] {Depth} commands waiting.")]
     public static partial void CommandQueueBacklog(this ILogger logger, int depth);
 
-    [LoggerMessage(EventId = 801, Level = LogLevel.Information, Message = "<<<<<<<<<< OK      {Action} - {Timings}\n")]
+    /// <remarks>
+    /// "SENT", not "OK". The bridge hands the chord to the page and has no way to observe which
+    /// component acted on it, so this line only ever meant "dispatched without error" - and it
+    /// read as "the SIM did what you asked" during a period when chords were landing in a chart.
+    /// A success word the log cannot actually justify is worse than a plain one.
+    /// </remarks>
+    [LoggerMessage(EventId = 801, Level = LogLevel.Information, Message = "<<<<<<<<<< SENT    {Action} - {Timings}\n")]
     public static partial void CommandSucceeded(this ILogger logger, string action, string timings);
 
     [LoggerMessage(EventId = 802, Level = LogLevel.Error, Message = "<<<<<<<<<< FAILED  {Action}: {Reason} - {Timings}\n")]

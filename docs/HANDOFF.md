@@ -3,7 +3,7 @@
 Written for a fresh assistant conversation with no prior context. Everything here was learned the
 expensive way; most of it is not visible from the code alone.
 
-**Last updated:** version 1.1.1, 333 tests passing.
+**Last updated:** version 1.1.2, 338 tests passing.
 
 ---
 
@@ -44,7 +44,7 @@ sent) and reports them differently.
 
 ## 3. Current state
 
-Working tree clean, local == remote, 333 tests, builds with warnings as errors.
+Working tree clean, local == remote, 338 tests, builds with warnings as errors.
 
 **Shipped and working:** hotkeys with reclaim-on-conflict retry; warm CDP connection with watchdog,
 zombie detection and sleep/resume recovery; single-round-trip Level 2 probe (~9 ms steady state);
@@ -104,6 +104,35 @@ Bit twice: once in a `.csproj` describing `--debug`, once in the `.wxs` describi
 - A form focuses the first control in tab order on `Show`. Anything set up in the constructor that
   depends on focus must be redone in `OnShown`.
 - `DataGridView.AllowUserToAddRows` renders a permanent blank row that reads as a stray record.
+
+### The SIM's charts are iframes, and focus beats selection
+The charts are TradingView widgets in `blob:` iframes — four on a normal dashboard. **Clicking
+inside one moves browser keyboard focus to that frame**, and CDP delivers a dispatched chord to the
+*focused frame*. Level 2 then never sees the key: TradingView takes the first printable character
+as the start of a symbol search, so `Shift+Digit3` opened a search box containing `#`.
+
+The trap is that **every other signal says everything is fine.** FlexLayout runs in the parent
+document and never sees a click that lands inside a frame, so `flexlayout__tabset-selected` stays
+on Level 2. The probe reported Ready, the tab click was correctly skipped as unnecessary
+(`target 4.4ms`), and the command logged OK — while the order never happened. Selection and focus
+are independent, and only focus decides which *document* receives the key.
+
+Diagnosed by measurement, not reasoning: three separate theories were wrong first. The decisive
+evidence was a capture-phase `keydown` listener on the top document recording **nothing** for a
+keystroke the bridge had definitely dispatched — a listener on `document` cannot miss a key
+delivered to that document, so the key had gone to another one. `document.activeElement` in the top
+document was an `<iframe>`, and Playwright's frame tree showed `document.hasFocus()` true inside it.
+
+The fix is in `Level2Controller`: the probe reports `focusInFrame` on the same round trip as
+everything else, and preparation blurs the focused frame to return focus to the page, then re-probes
+to verify. `Level2Result.RefusedIfFocusTrapped()` is the invariant — Ready and focus-trapped must
+never be dispatchable together, on any path. Verified against a live TradingView iframe before
+shipping: `iframe` → blur → `body`.
+
+Two reporting faults fell out of this and are fixed too. The Level 2 selection lines were **Debug**
+while the operator runs at Information, so the log could not say whether targeting had done anything
+— the one fact needed to diagnose it. And the success line said `OK` when it only ever meant
+*dispatched*; it now says `SENT`, because the bridge cannot observe which component acted.
 
 ### The Action column is hidden, and hiding is not removing
 `Action` (Test / Diagnostics) is no longer shown in the editor: Test is a button in the toolbar and
@@ -183,7 +212,7 @@ legible and that the Save button actually disables.
 
 ```powershell
 dotnet build                              # warnings are errors
-dotnet test                               # 333 tests
+dotnet test                               # 338 tests
 pwsh -File installer/Build-Installer.ps1  # publish + MSI -> artifacts/installer/
 ```
 

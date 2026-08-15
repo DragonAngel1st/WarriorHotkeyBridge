@@ -71,6 +71,26 @@ internal sealed record Level2Result
     public bool PageVisible { get; init; }
 
     /// <summary>
+    /// True when browser keyboard focus sits on a child frame rather than the page itself.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This decides which <em>document</em> receives a dispatched chord, and it outranks every
+    /// other signal here. The SIM's charts are TradingView widgets in iframes; clicking inside one
+    /// moves focus to that frame, and from then on Playwright's keyboard input is delivered there.
+    /// Level 2 never sees the key, however plainly it is the selected FlexLayout component -
+    /// measured on a live session, where a chord arrived in a chart as the first character of its
+    /// symbol search while the bridge correctly reported Level 2 ready.
+    /// </para>
+    /// <para>
+    /// FlexLayout runs in the parent document and never sees a click that lands inside a frame, so
+    /// its own selection state stays pointing at Level 2 throughout. The two signals genuinely
+    /// disagree, and only this one is about where keystrokes go.
+    /// </para>
+    /// </remarks>
+    public bool FocusTrappedInFrame { get; init; }
+
+    /// <summary>
     /// True when the probe could not be executed at all, as opposed to running and reporting
     /// that Level 2 is absent. Only the former says anything about connection health.
     /// </summary>
@@ -81,12 +101,45 @@ internal sealed record Level2Result
     public string? Reason { get; init; }
 
     public bool IsReady => Status is Level2Status.Ready;
+
+    /// <summary>
+    /// This result, refused if a chord dispatched now would be delivered to a child frame.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The last gate before the command path treats a page as dispatchable, so the guarantee holds
+    /// however readiness was arrived at rather than only on the path that repairs focus. Ready and
+    /// focus-trapped is precisely the combination that produced the bug: every selection signal
+    /// correct, and the keystroke delivered somewhere else entirely.
+    /// </para>
+    /// <para>
+    /// Leaves a worse status alone. "Level 2 is not on this page" is the more useful thing to be
+    /// told, and overwriting it with a focus complaint would send the operator after the wrong
+    /// problem.
+    /// </para>
+    /// </remarks>
+    public Level2Result RefusedIfFocusTrapped() =>
+        IsReady && FocusTrappedInFrame
+            ? this with
+            {
+                Status = Level2Status.Found,
+                Reason = "Keyboard focus is inside a chart frame, so the shortcut would have been "
+                    + "typed into the chart instead of Level 2. Click the Level 2 panel once and "
+                    + "press the key again. Nothing was sent.",
+            }
+            : this;
 }
 
 /// <summary>
-/// Finds the Level 2 &amp; Order Entry component and makes sure it is the selected FlexLayout
-/// component, which is the condition under which the SIM acts on a keyboard shortcut.
+/// Makes the page ready to receive a chord: keyboard focus on the page itself rather than a
+/// child frame, and Level 2 the selected FlexLayout component.
 /// </summary>
+/// <remarks>
+/// Both conditions are required and they are independent. Selection decides which component the
+/// SIM routes a key to; focus decides which document the key is delivered to at all. Satisfying
+/// only the second is how a chord came to be typed into a chart's symbol search while every
+/// reported signal said Level 2 was ready.
+/// </remarks>
 /// <remarks>
 /// Works exclusively through the DOM. No screen coordinates, no mouse movement, no
 /// <c>SendInput</c> - a click here is a Playwright DOM click on the tab header, which cannot

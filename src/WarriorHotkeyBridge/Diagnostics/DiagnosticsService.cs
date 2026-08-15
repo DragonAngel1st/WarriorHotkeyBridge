@@ -226,6 +226,14 @@ internal sealed class DiagnosticsService : IDiagnosticsService
             Line(report, "Panels", level2.MatchCount.ToString(CultureInfo.InvariantCulture));
             Line(report, "Has tab bar", level2.HasTabBar ? "yes" : "no (popped out?)");
             Line(report, "Tabset selected", level2.IsSelected ? "yes" : "no - the command path will click it");
+
+            // Separate from selection on purpose: these two disagree in exactly the case that
+            // matters, and a report showing only the first says everything is fine while a chord
+            // would land in a chart.
+            Line(report, "Keyboard focus", level2.FocusTrappedInFrame
+                ? "IN A CHILD FRAME (a chart) - the command path will return it to the page"
+                : "on the page");
+
             Line(report, "Probe failed", level2.ProbeFailed ? "YES" : "no");
         }
         catch (Exception ex) when (ex is PlaywrightException or TimeoutException)
