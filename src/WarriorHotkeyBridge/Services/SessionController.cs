@@ -71,24 +71,34 @@ internal sealed class SessionController : ISessionController, IDisposable
 
         try
         {
-            // Not an error and not worth a second launch attempt: pressing a "go trading" button
-            // twice is an ordinary thing to do, and the correct response is to carry on.
-            if (State is SessionState.Armed)
+            bool alreadyArmed = State is SessionState.Armed;
+
+            if (alreadyArmed)
             {
+                // The hotkeys are already held, so there is nothing to register. Chrome is a
+                // different question and is asked below.
                 _logger.SessionAlreadyArmed();
-                return;
+            }
+            else
+            {
+                _logger.SessionArming();
+
+                // Hotkeys first. They are the part the operator is waiting on, they cost
+                // microseconds, and they must not be delayed behind a browser launch that can
+                // take seconds or fail.
+                await _ui.InvokeAsync(_hotkeys.RegisterAll).ConfigureAwait(false);
+
+                _state.Update(current => current with { Session = SessionState.Armed });
             }
 
-            _logger.SessionArming();
-
-            // Hotkeys first. They are the part the operator is waiting on, they cost microseconds,
-            // and they must not be delayed behind a browser launch that can take seconds or fail.
-            await _ui.InvokeAsync(_hotkeys.RegisterAll).ConfigureAwait(false);
-
-            _state.Update(current => current with { Session = SessionState.Armed });
-
-            // Launched after the state flips so the watchdog, which only maintains Chrome while
-            // armed, takes over from here whatever this one call does.
+            // Always, on both paths. "Go trading" means "put me in a state where I can trade",
+            // and the case where it has the most work to do is precisely an armed session whose
+            // browser has since been closed - returning early there is how the button came to do
+            // nothing at all. Cheap when Chrome is already up: the launcher checks the endpoint
+            // first and returns without starting anything.
+            //
+            // After the state flip, so the watchdog - which only maintains Chrome while armed -
+            // takes over from here whatever this one call does.
             bool ready = await _launcher.LaunchOnRequestAsync(cancellationToken).ConfigureAwait(false);
 
             if (!ready)
@@ -105,7 +115,10 @@ internal sealed class SessionController : ISessionController, IDisposable
                 });
             }
 
-            _logger.SessionArmed();
+            if (!alreadyArmed)
+            {
+                _logger.SessionArmed();
+            }
         }
         finally
         {

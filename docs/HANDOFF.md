@@ -3,7 +3,7 @@
 Written for a fresh assistant conversation with no prior context. Everything here was learned the
 expensive way; most of it is not visible from the code alone.
 
-**Last updated:** version 1.2.2, 348 tests passing.
+**Last updated:** version 1.2.3, 348 tests passing.
 
 ---
 
@@ -123,6 +123,10 @@ browser by hand simply brought it back and a stop button was not expressible.
 - The deck's *Stop Trading* shortcut is now `--park --silent`, not `--quit --close-chrome`.
   Quitting released the hotkeys but took the tray icon with it, so there was nothing left to show
   the bridge was off and nothing to press to bring it back.
+- **Arming is idempotent, and that is load-bearing.** `ArmAsync` returning early when already armed
+  skipped the Chrome launch, so pressing Go Trading with the session armed but the browser closed
+  did nothing at all - the state most in need of the button. Registration is skipped on that path;
+  the launch is not.
 - **`Chrome:AutoLaunch` does not gate Start.** It governs one thing only: whether the watchdog puts
   Chrome back if it disappears mid-session. It is off by default so closing the browser yourself
   keeps it closed. Gating the explicit request on it shipped in 1.2.0 and made a fresh install's

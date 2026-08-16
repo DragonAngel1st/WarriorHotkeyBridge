@@ -253,9 +253,11 @@ internal static partial class BridgeLog
 
     /// <remarks>
     /// Information, not Warning: pressing a "go trading" button that is already on is an ordinary
-    /// thing to do, and the right response is to say so and carry on.
+    /// thing to do, and the right response is to say so and carry on. Note "nothing to register"
+    /// rather than "nothing to do" - Chrome is still brought back if it has been closed, which is
+    /// the whole reason someone presses the button twice.
     /// </remarks>
-    [LoggerMessage(EventId = 714, Level = LogLevel.Information, Message = "[SESSION] Already armed; nothing to do.")]
+    [LoggerMessage(EventId = 714, Level = LogLevel.Information, Message = "[SESSION] Already armed; nothing to register. Checking Chrome.")]
     public static partial void SessionAlreadyArmed(this ILogger logger);
 
     /// <inheritdoc cref="SessionAlreadyArmed"/>
