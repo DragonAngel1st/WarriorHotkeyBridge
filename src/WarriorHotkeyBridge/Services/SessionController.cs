@@ -93,9 +93,16 @@ internal sealed class SessionController : ISessionController, IDisposable
 
             if (!ready)
             {
-                // Not a failure to arm. The hotkeys are live, and the watchdog will keep trying;
-                // this only means the session is not ready to trade yet.
+                // Not a failure to arm: the hotkeys are live either way. But it is the operator's
+                // Start button appearing to do nothing, so it is recorded in the state as well as
+                // the log - the tray is where they are looking, and the log is not.
                 _logger.SessionChromeNotReady();
+
+                _state.Update(current => current with
+                {
+                    LastError = "Chrome could not be started. Check that it is installed at the "
+                        + "configured path; the log names the path that was tried.",
+                });
             }
 
             _logger.SessionArmed();

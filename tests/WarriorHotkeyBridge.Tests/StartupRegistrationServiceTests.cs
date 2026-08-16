@@ -80,6 +80,34 @@ public class StartupRegistrationServiceTests
         Assert.Null(store.Written);
     }
 
+    /// <summary>
+    /// An upgrade must rewrite a sign-in entry left over from a build that did not park.
+    /// </summary>
+    /// <remarks>
+    /// The entry names the same executable, so every other check reads it as healthy and leaves
+    /// it alone - and it would keep launching without the parked switch, arming a session and
+    /// opening Chrome at every sign-in. That is precisely what the switch exists to prevent, so
+    /// inheriting the old value would quietly deny the upgrade to everyone who already had one.
+    /// </remarks>
+    [Fact]
+    public async Task StartupOnWithArgumentsFromAnOlderBuild_IsRewritten()
+    {
+        var startup = new FakeStartupManager(
+            StartupState.Enabled,
+            registeredCommand: @"C:\Current\WarriorHotkeyBridge.exe");
+
+        var store = new FakeStartupPreferenceStore(Preference(on: true, version: AppInfo.Version));
+        var ui = new RecordingUiDispatcher();
+
+        await Run(startup, store, ui);
+
+        Assert.Equal(1, startup.EnableCalls);
+
+        // Silent: it is a repair, not a decision, so it must not put a question in front of the
+        // operator at sign-in.
+        Assert.Equal(0, ui.DeferredCount);
+    }
+
     [Fact]
     public async Task StartupOnButPointingElsewhere_IsRepairedWithoutAsking()
     {
@@ -339,14 +367,34 @@ public class StartupRegistrationServiceTests
             NullLogger<StartupRegistrationService>.Instance)
         .StartAsync(CancellationToken.None);
 
-    private sealed class FakeStartupManager(StartupState state, bool enableSucceeds = true) : IStartupManager
+    /// <param name="registeredCommand">
+    /// Overrides the stored command, for the case where the entry names the right executable but
+    /// carries arguments from an older build.
+    /// </param>
+    private sealed class FakeStartupManager(
+        StartupState state,
+        bool enableSucceeds = true,
+        string? registeredCommand = null) : IStartupManager
     {
+        private const string Expected = @"C:\Current\WarriorHotkeyBridge.exe --parked";
+
         public int EnableCalls { get; private set; }
 
+        /// <remarks>
+        /// An enabled entry always has a stored command - that is how it was determined to be
+        /// enabled - so it reports the expected one unless a test says otherwise. Modelling it as
+        /// null made "enabled" indistinguishable from "stale", and the service cannot tell the
+        /// difference either if the fake lies about it.
+        /// </remarks>
         public StartupStatus GetStatus() => new(
             state,
-            state is StartupState.PointsElsewhere ? @"C:\Old\WarriorHotkeyBridge.exe" : null,
-            @"C:\Current\WarriorHotkeyBridge.exe");
+            registeredCommand ?? (state switch
+            {
+                StartupState.PointsElsewhere => @"C:\Old\WarriorHotkeyBridge.exe --parked",
+                StartupState.Disabled => null,
+                _ => Expected,
+            }),
+            Expected);
 
         public bool TryEnable(out string? error)
         {

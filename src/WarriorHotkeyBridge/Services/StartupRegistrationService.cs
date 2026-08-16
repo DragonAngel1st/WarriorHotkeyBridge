@@ -100,6 +100,23 @@ internal sealed class StartupRegistrationService : IHostedService
                     _logger.StartupRegistryFailed(error ?? "unknown");
                 }
             }
+            else if (status.State is StartupState.Enabled
+                && !string.Equals(status.RegisteredCommand, status.ExpectedCommand, StringComparison.Ordinal))
+            {
+                // Right executable, stale arguments. An entry written by an older build points at
+                // the same file, so every other check reads it as healthy and leaves it alone -
+                // and it would keep launching without the parked switch, arming a session and
+                // opening Chrome at every sign-in. That is the exact behaviour the switch exists
+                // to prevent, so an upgrade has to rewrite the value rather than inherit it.
+                if (_startup.TryEnable(out string? error))
+                {
+                    _logger.StartupArgumentsUpdated(status.RegisteredCommand ?? "(unknown)", status.ExpectedCommand);
+                }
+                else
+                {
+                    _logger.StartupRegistryFailed(error ?? "unknown");
+                }
+            }
 
             // Keep the recorded version current so that if the operator later switches startup
             // off, the post-update offer is measured from that point rather than from whenever

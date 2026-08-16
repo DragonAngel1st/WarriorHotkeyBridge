@@ -99,9 +99,21 @@ internal sealed class ChromeOptions : IValidatableObject
     public string UserDataDirectory { get; init; } = string.Empty;
 
     /// <summary>
-    /// When true the bridge starts the dedicated Chrome instance itself if the endpoint is not
-    /// answering. Off by default; turn it on for a one-button Stream Deck start.
+    /// Whether the watchdog puts Chrome back if it disappears during an armed session.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Off by default, and that is the point: closing the browser yourself should keep it closed.
+    /// With it on, the watchdog relaunches within its cooldown, which is what made an earlier
+    /// build feel like it was fighting the operator.
+    /// </para>
+    /// <para>
+    /// This does <b>not</b> gate Start. Pressing Start - from the tray or a deck key - always
+    /// launches Chrome, because that is the operator asking rather than the bridge deciding.
+    /// The two were once the same thing, and leaving them so meant a fresh install's Start button
+    /// silently did nothing at all.
+    /// </para>
+    /// </remarks>
     public bool AutoLaunch { get; init; }
 
     /// <summary>

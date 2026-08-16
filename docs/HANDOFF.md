@@ -3,7 +3,7 @@
 Written for a fresh assistant conversation with no prior context. Everything here was learned the
 expensive way; most of it is not visible from the code alone.
 
-**Last updated:** version 1.2.0, 343 tests passing.
+**Last updated:** version 1.2.1, 347 tests passing.
 
 ---
 
@@ -44,7 +44,7 @@ sent) and reports them differently.
 
 ## 3. Current state
 
-Working tree clean, local == remote, 343 tests, builds with warnings as errors.
+Working tree clean, local == remote, 347 tests, builds with warnings as errors.
 
 **Shipped and working:** hotkeys with reclaim-on-conflict retry; warm CDP connection with watchdog,
 zombie detection and sleep/resume recovery; single-round-trip Level 2 probe (~9 ms steady state);
@@ -53,8 +53,8 @@ Go/Stop shortcuts and button art; hotkey editor with presets and key capture.
 
 **Verified against a live SIM session.** Real trades executed end to end in 26–47 ms.
 
-**Released:** `v1.0.0` and `v1.1.1` on GitHub, the latter with the MSI attached and marked latest.
-1.1.2 (the iframe-focus fix) is installed locally but was never released; 1.2.0 supersedes it.
+**Released:** `v1.0.0`, `v1.1.1` and `v1.2.0` on GitHub, each with the MSI attached. `v1.2.1`
+follows immediately: 1.2.0 shipped with Start unable to launch Chrome on a fresh install.
 
 ## 4. Traps — read this before touching anything
 
@@ -123,6 +123,17 @@ browser by hand simply brought it back and a stop button was not expressible.
 - The deck's *Stop Trading* shortcut is now `--park --silent`, not `--quit --close-chrome`.
   Quitting released the hotkeys but took the tray icon with it, so there was nothing left to show
   the bridge was off and nothing to press to bring it back.
+- **`Chrome:AutoLaunch` does not gate Start.** It governs one thing only: whether the watchdog puts
+  Chrome back if it disappears mid-session. It is off by default so closing the browser yourself
+  keeps it closed. Gating the explicit request on it shipped in 1.2.0 and made a fresh install's
+  Start button silently do nothing — the starter config ships the Chrome block commented out, so
+  `AutoLaunch` was false and `LaunchOnRequestAsync` returned before launching. Pressing Start *is*
+  the permission; the setting answers "may the bridge act on its own initiative", which is a
+  different question.
+- **An upgrade rewrites its own sign-in entry.** A Run value written by an older build names the
+  same executable, so `PointsAt` reads it as healthy and every other check leaves it alone — and it
+  would go on launching without `--parked`, arming a session at every sign-in. The service compares
+  the whole command against `ExpectedCommand` and rewrites silently: it is a repair, not a decision.
 - `SessionController` orders it deliberately: arming registers hotkeys **before** launching Chrome
   so the deck is live immediately; parking flips the state **before** closing the browser, or the
   watchdog relaunches it in the gap and the stop button appears to do nothing.
@@ -253,7 +264,7 @@ legible and that the Save button actually disables.
 
 ```powershell
 dotnet build                              # warnings are errors
-dotnet test                               # 343 tests
+dotnet test                               # 347 tests
 pwsh -File installer/Build-Installer.ps1  # publish + MSI -> artifacts/installer/
 ```
 

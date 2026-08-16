@@ -89,7 +89,9 @@ internal static class StarterConfiguration
             }
           },
 
-          "// ONE BUTTON START": "Uncomment the Chrome block to have the bridge launch its own Chrome, on its own profile, with remote debugging enabled - so a single Stream Deck button starts a trading session. It never touches your ordinary Chrome profile.",
+          "// ONE BUTTON START": "Nothing to configure. Start - from the tray or the Go Trading deck key - launches the bridge's own Chrome, on its own profile, with remote debugging enabled. It never touches your ordinary Chrome profile, and nothing opens until you press Start.",
+
+          "// KEEPING CHROME ALIVE": "AutoLaunch decides only whether the bridge puts Chrome back if it disappears mid-session. It is off so that closing the browser yourself keeps it closed. Uncomment the Chrome block to have it reopened automatically instead.",
 
           "// Chrome": {
             "AutoLaunch": true

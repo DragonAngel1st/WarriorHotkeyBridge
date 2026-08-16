@@ -85,17 +85,29 @@ internal sealed class ChromeLauncher : IChromeLauncher, IDisposable
         return await LaunchAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Starts Chrome because the operator asked for a session.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Deliberately not gated on <see cref="ChromeOptions.AutoLaunch"/>. That setting answers
+    /// "may the bridge start Chrome on its own initiative", and pressing Start is the opposite of
+    /// that - it is the operator's initiative, and refusing it means the button does nothing at
+    /// all with no way to tell why.
+    /// </para>
+    /// <para>
+    /// The two used to be the same thing, because the only way to launch was the watchdog. Now
+    /// that the watchdog runs only while armed, the setting governs just one question: whether
+    /// Chrome is put back if it disappears mid-session. Keeping the gate here made a fresh
+    /// install's Start button silently do nothing.
+    /// </para>
+    /// </remarks>
     public async Task<bool> LaunchOnRequestAsync(CancellationToken cancellationToken)
     {
         if (await IsEndpointAliveAsync(cancellationToken).ConfigureAwait(false))
         {
             // Already there. The session is ready, which is what was actually being asked for.
             return true;
-        }
-
-        if (!_options.AutoLaunch)
-        {
-            return false;
         }
 
         _lastAttempt = Stopwatch.GetTimestamp();

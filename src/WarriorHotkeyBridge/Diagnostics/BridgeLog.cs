@@ -59,6 +59,14 @@ internal static partial class BridgeLog
     [LoggerMessage(EventId = 210, Level = LogLevel.Information, Message = "[STARTUP] Repaired a startup entry that pointed at {OldCommand}")]
     public static partial void StartupRepaired(this ILogger logger, string oldCommand);
 
+    /// <remarks>
+    /// An entry written by an older build names the same executable, so every other check reads
+    /// it as healthy. Without this it keeps launching without the parked switch, arming a session
+    /// and opening Chrome at every sign-in - the exact behaviour that switch exists to prevent.
+    /// </remarks>
+    [LoggerMessage(EventId = 221, Level = LogLevel.Information, Message = "[STARTUP] Sign-in entry updated from {OldCommand} to {NewCommand}.")]
+    public static partial void StartupArgumentsUpdated(this ILogger logger, string oldCommand, string newCommand);
+
     [LoggerMessage(EventId = 213, Level = LogLevel.Information, Message = "[STARTUP] Start with Windows was recorded as on but no registration was present; restored it.")]
     public static partial void StartupRestored(this ILogger logger);
 
