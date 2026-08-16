@@ -51,6 +51,36 @@ internal sealed record CommandLineOptions
     /// <summary>Anything unrecognised, reported to the user instead of being silently ignored.</summary>
     public IReadOnlyList<string> UnknownArgs { get; init; } = [];
 
+    /// <summary>
+    /// Switch the bridge on: register the hotkeys and bring Chrome up.
+    /// </summary>
+    /// <remarks>
+    /// Equivalent to launching with no flags, and named anyway so a Stream Deck button says what
+    /// it does. A bare second launch has always meant "ready the session"; keeping that means an
+    /// existing Go Trading shortcut still works after this change.
+    /// </remarks>
+    public bool Start { get; init; }
+
+    /// <summary>
+    /// Switch the bridge off: release the hotkeys and close Chrome, leaving it resident.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not spelled <c>--stop</c>, which is an existing alias for <c>--quit</c> and
+    /// ends the process. Reusing it would silently change what every shortcut already using it
+    /// does, including the one the installer wrote.
+    /// </remarks>
+    public bool Park { get; init; }
+
+    /// <summary>
+    /// Start resident but switched off, waiting to be armed.
+    /// </summary>
+    /// <remarks>
+    /// What the sign-in registration uses. Starting armed at sign-in is what forced Chrome open
+    /// every morning; starting parked means the operator decides when a session begins. A manual
+    /// launch still arms, because someone who double-clicks the application wants to use it.
+    /// </remarks>
+    public bool StartParked { get; init; }
+
     public static CommandLineOptions Parse(IReadOnlyList<string> args)
     {
         ArgumentNullException.ThrowIfNull(args);
@@ -62,6 +92,9 @@ internal sealed record CommandLineOptions
         bool closeChrome = false;
         bool uninstallCleanup = false;
         bool silent = false;
+        bool start = false;
+        bool park = false;
+        bool startParked = false;
         List<string> configurationArgs = [];
         List<string> unknown = [];
 
@@ -100,6 +133,18 @@ internal sealed record CommandLineOptions
                 case "quiet":
                     silent = true;
                     continue;
+                case "start":
+                case "arm":
+                case "go":
+                    start = true;
+                    continue;
+                case "park":
+                case "off":
+                    park = true;
+                    continue;
+                case "parked":
+                    startParked = true;
+                    continue;
             }
 
             // Configuration overrides must be fully qualified so we can tell them apart
@@ -122,6 +167,9 @@ internal sealed record CommandLineOptions
             CloseChrome = closeChrome,
             UninstallCleanup = uninstallCleanup,
             Silent = silent,
+            Start = start,
+            Park = park,
+            StartParked = startParked,
             ConfigurationArgs = configurationArgs,
             UnknownArgs = unknown,
         };
@@ -157,6 +205,13 @@ internal sealed record CommandLineOptions
         Options:
           --debug, -d            Show a diagnostic console window and log at Debug level.
           --version              Print the application version and exit.
+          --start, --go          Switch the bridge on: register the hotkeys and bring Chrome up.
+                                 Starts the bridge first if it is not already resident. Same as
+                                 launching with no options; pressing it twice is harmless.
+          --park, --off          Switch the bridge off: release the hotkeys and close Chrome,
+                                 leaving the tray icon running. Does nothing if not resident.
+          --parked               Start resident but switched off. Used by the sign-in
+                                 registration so a session begins only when you ask for one.
           --quit, --stop         Ask a running instance to exit cleanly, then exit.
           --close-chrome         With --quit, also close the dedicated Chrome instance.
                                  Releases the global hotkeys for other applications.

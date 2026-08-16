@@ -404,6 +404,13 @@ public class StartupRegistrationServiceTests
 
         public void Defer(Action action) => _deferred.Add(action);
 
+        /// <summary>Inline: this stub reports itself as the UI thread, so there is nothing to marshal.</summary>
+        public Task InvokeAsync(Action action)
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
         public void RunDeferred()
         {
             foreach (Action action in _deferred.ToArray())

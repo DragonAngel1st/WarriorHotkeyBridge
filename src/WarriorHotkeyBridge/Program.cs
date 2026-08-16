@@ -136,6 +136,22 @@ internal static class Program
             return ExitShutdownTimedOut;
         }
 
+        // Before the instance guard, like --quit: this process is not trying to become the bridge,
+        // it is asking the resident one to switch off. Taking the mutex would make it look like a
+        // rejected second instance.
+        if (cli.Park)
+        {
+            ConsoleHost.EnsureConsole(allocateIfMissing: !cli.Silent);
+
+            // Not an error when nothing is running. A stop button should not report failure
+            // because the thing was already stopped - the same reasoning as --quit.
+            WriteLineIfConsole(SessionSignal.TrySignal(SessionRequest.Park)
+                ? "Asked Warrior Hotkey Bridge to switch off; its hotkeys are released."
+                : "Warrior Hotkey Bridge is not running.");
+
+            return ExitSuccess;
+        }
+
         bool consoleAvailable = !cli.Debug || ConsoleHost.EnsureConsole();
 
         // The instance guard runs before logging is configured, not just as a courtesy: the
@@ -146,10 +162,19 @@ internal static class Program
         if (!instance.IsPrimary)
         {
             // A bridge is already resident, which is not a problem to report - it is most of what
-            // this launch wanted. Hand the request over instead: the running instance brings
-            // Chrome up if it is not there, so pressing "go trading" is idempotent and always
-            // ends in a session that is ready, whatever state things were in.
-            if (ActivationSignal.TrySignal())
+            // this launch wanted. Hand the request over instead: the running instance arms itself
+            // and brings Chrome up, so pressing "go trading" is idempotent and always ends in a
+            // session that is ready, whatever state things were in.
+            //
+            // A --parked launch is the exception. That is the sign-in registration arriving after
+            // the operator already started a session by hand, and it must not switch one on.
+            if (cli.StartParked)
+            {
+                WriteLineIfConsole("Warrior Hotkey Bridge is already running; leaving it as it is.");
+                return ExitSuccess;
+            }
+
+            if (SessionSignal.TrySignal(SessionRequest.Arm))
             {
                 WriteLineIfConsole("Warrior Hotkey Bridge is already running; asked it to ready the session.");
                 return ExitSuccess;
@@ -169,9 +194,9 @@ internal static class Program
         // still mapped. The handler is attached later, and a request that arrives first is held.
         using ShutdownSignal shutdown = ShutdownSignal.Create();
 
-        // Same reasoning, same moment: a second launch decides what to do by whether this event
-        // exists, so it has to exist for the whole of startup rather than appearing at the end.
-        using ActivationSignal activation = ActivationSignal.Create();
+        // Same reasoning, same moment: a second launch decides what to do by whether these events
+        // exist, so they have to exist for the whole of startup rather than appearing at the end.
+        using SessionSignal session = SessionSignal.Create();
 
         AppPaths paths;
         IConfigurationRoot configuration;
@@ -229,7 +254,7 @@ internal static class Program
                 Log.Warning("Debug mode was requested but no console could be attached; file logging only.");
             }
 
-            return Run(paths, configuration, cli, shutdown, activation);
+            return Run(paths, configuration, cli, shutdown, session);
         }
         catch (Exception ex)
         {
@@ -375,7 +400,7 @@ internal static class Program
         IConfigurationRoot configuration,
         CommandLineOptions cli,
         ShutdownSignal shutdown,
-        ActivationSignal activation)
+        SessionSignal session)
     {
         ApplicationConfiguration.Initialize();
 
@@ -437,42 +462,52 @@ internal static class Program
             host.Services.GetRequiredService<IHostApplicationLifetime>().StopApplication();
         });
 
-        // A second launch - the operator pressing "go trading" again - lands here instead of
-        // being turned away. Bringing Chrome up is the useful half of what that press wanted.
-        activation.Attach(() =>
+        // A deck button - or a second launch - lands here instead of being turned away.
+        session.Attach(request =>
         {
-            Log.Information("Another launch asked for the session to be readied.");
+            Log.Information("Session {Request} requested by another launch.", request);
 
             try
             {
-                // Thread-pool thread, so blocking is safe; the UI thread is untouched.
-                bool ready = host.Services.GetRequiredService<IChromeLauncher>()
-                    .LaunchOnRequestAsync(CancellationToken.None)
-                    .GetAwaiter()
-                    .GetResult();
+                var controller = host.Services.GetRequiredService<ISessionController>();
 
-                if (!ready)
-                {
-                    Log.Warning(
-                        "Could not ready the session. Chrome is not answering on the configured "
-                        + "endpoint, and Chrome:AutoLaunch is off so the bridge will not start it.");
-                }
+                // Thread-pool thread, so blocking is safe; the UI thread is untouched, and the
+                // controller marshals hotkey registration onto it for itself.
+                Task work = request is SessionRequest.Arm
+                    ? controller.ArmAsync(CancellationToken.None)
+                    : controller.ParkAsync(CancellationToken.None);
+
+                work.GetAwaiter().GetResult();
             }
             catch (Exception ex)
             {
                 // Never let a button press take the bridge down; the hotkeys matter more.
-                Log.Error(ex, "Readying the session failed.");
+                Log.Error(ex, "Switching the session {Request} failed.", request);
             }
         });
 
         state.Update(current => current with { Application = ApplicationState.Running });
 
-        // Registered here, on the UI thread, and before the loop starts: Win32 binds a hotkey
+        // Arming happens here, on the UI thread, and before the loop starts: Win32 binds a hotkey
         // to the registering thread's window, and WM_HOTKEY is only ever delivered to that
         // thread's queue. Doing this from a hosted service would register on a thread-pool
         // thread, succeed, and then never deliver a single keypress.
+        //
+        // Parked launches skip it entirely. That is the sign-in case, and starting armed there is
+        // what made Chrome open itself every morning whether or not a session was wanted.
         var hotkeys = host.Services.GetRequiredService<GlobalHotkeyService>();
-        hotkeys.RegisterAll();
+
+        if (cli.StartParked)
+        {
+            Log.Information("Starting parked; the hotkeys are not registered until you switch it on.");
+        }
+        else
+        {
+            host.Services.GetRequiredService<ISessionController>()
+                .ArmAsync(CancellationToken.None)
+                .GetAwaiter()
+                .GetResult();
+        }
 
         Log.Information("Bridge running. State: {State}", state.Current.ToLogSummary());
 
@@ -573,6 +608,7 @@ internal static class Program
         services.AddSingleton<GlobalHotkeyService>();
         services.AddSingleton<IGlobalHotkeyService>(sp => sp.GetRequiredService<GlobalHotkeyService>());
 
+        services.AddSingleton<ISessionController, SessionController>();
         services.AddSingleton<TrayIconService>();
         services.AddSingleton<TrayApplicationContext>();
     }

@@ -83,6 +83,53 @@ internal sealed class WinFormsUiDispatcher : IUiDispatcher, IDisposable
         }
     }
 
+    public Task InvokeAsync(Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        if (_disposed)
+        {
+            _logger.UiUpdateDroppedDisposed();
+            return Task.CompletedTask;
+        }
+
+        // Inline when already on the UI thread. Awaiting a BeginInvoke from the thread that runs
+        // the message loop would wait for a pump that cannot happen until this call returns.
+        if (IsOnUiThread)
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        try
+        {
+            _anchor.BeginInvoke(() =>
+            {
+                try
+                {
+                    action();
+                    completion.TrySetResult();
+                }
+                catch (Exception ex)
+                {
+                    // Surfaced to the caller rather than thrown on the UI thread, where it would
+                    // reach the unhandled-exception handler and be reported as a UI fault instead
+                    // of as the failure of whatever asked for this.
+                    completion.TrySetException(ex);
+                }
+            });
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException)
+        {
+            _logger.UiUpdateDroppedNoMessageLoop(ex);
+            completion.TrySetResult();
+        }
+
+        return completion.Task;
+    }
+
     public void Dispose()
     {
         if (_disposed)

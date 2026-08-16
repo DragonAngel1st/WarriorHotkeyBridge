@@ -12,17 +12,39 @@ public class StartupCommandTests
     [Fact]
     public void Format_AlwaysQuotes()
     {
-        Assert.Equal("\"C:\\Apps\\WarriorHotkeyBridge.exe\"", StartupCommand.Format(@"C:\Apps\WarriorHotkeyBridge.exe"));
+        Assert.Equal(
+            "\"C:\\Apps\\WarriorHotkeyBridge.exe\" --parked",
+            StartupCommand.Format(@"C:\Apps\WarriorHotkeyBridge.exe"));
 
         Assert.Equal(
-            "\"C:\\Program Files\\Warrior Hotkey Bridge\\WarriorHotkeyBridge.exe\"",
+            "\"C:\\Program Files\\Warrior Hotkey Bridge\\WarriorHotkeyBridge.exe\" --parked",
             StartupCommand.Format(@"C:\Program Files\Warrior Hotkey Bridge\WarriorHotkeyBridge.exe"));
     }
+
+    /// <summary>
+    /// Signing in must not start a trading session.
+    /// </summary>
+    /// <remarks>
+    /// Without the switch the bridge armed itself every morning: hotkeys registered and its Chrome
+    /// profile opened whether or not a session was wanted, and closing that browser by hand simply
+    /// brought it back. The switch is what makes starting a session a deliberate act.
+    /// </remarks>
+    [Fact]
+    public void Format_StartsParkedSoSignInDoesNotOpenChrome() =>
+        Assert.Contains(StartupCommand.ParkedSwitch, StartupCommand.Format(@"C:\Apps\x.exe"), StringComparison.Ordinal);
+
+    /// <summary>
+    /// The path must still be recoverable from the stored value, or the "points at another copy"
+    /// check would report every registration as foreign the moment an argument was added.
+    /// </summary>
+    [Fact]
+    public void Format_StillPointsAtTheExecutable() =>
+        Assert.True(StartupCommand.PointsAt(StartupCommand.Format(@"C:\Apps\x.exe"), @"C:\Apps\x.exe"));
 
     [Fact]
     public void Format_DoesNotDoubleQuoteAnAlreadyQuotedPath()
     {
-        Assert.Equal("\"C:\\Apps\\x.exe\"", StartupCommand.Format("\"C:\\Apps\\x.exe\""));
+        Assert.Equal("\"C:\\Apps\\x.exe\" --parked", StartupCommand.Format("\"C:\\Apps\\x.exe\""));
     }
 
     [Theory]

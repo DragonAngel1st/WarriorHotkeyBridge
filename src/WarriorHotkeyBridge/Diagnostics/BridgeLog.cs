@@ -231,6 +231,38 @@ internal static partial class BridgeLog
     [LoggerMessage(EventId = 705, Level = LogLevel.Warning, Message = "[LEVEL2] Not ready: {Reason}")]
     public static partial void Level2NotReady(this ILogger logger, string reason);
 
+    [LoggerMessage(EventId = 710, Level = LogLevel.Information, Message = "[SESSION] Arming: registering hotkeys and bringing Chrome up.")]
+    public static partial void SessionArming(this ILogger logger);
+
+    [LoggerMessage(EventId = 711, Level = LogLevel.Information, Message = "[SESSION] Armed. Hotkeys are live.")]
+    public static partial void SessionArmed(this ILogger logger);
+
+    [LoggerMessage(EventId = 712, Level = LogLevel.Information, Message = "[SESSION] Parking: releasing hotkeys and closing Chrome.")]
+    public static partial void SessionParking(this ILogger logger);
+
+    [LoggerMessage(EventId = 713, Level = LogLevel.Information, Message = "[SESSION] Parked. Hotkeys released; F13-F24 are free for other applications.")]
+    public static partial void SessionParked(this ILogger logger);
+
+    /// <remarks>
+    /// Information, not Warning: pressing a "go trading" button that is already on is an ordinary
+    /// thing to do, and the right response is to say so and carry on.
+    /// </remarks>
+    [LoggerMessage(EventId = 714, Level = LogLevel.Information, Message = "[SESSION] Already armed; nothing to do.")]
+    public static partial void SessionAlreadyArmed(this ILogger logger);
+
+    /// <inheritdoc cref="SessionAlreadyArmed"/>
+    [LoggerMessage(EventId = 715, Level = LogLevel.Information, Message = "[SESSION] Already parked; nothing to do.")]
+    public static partial void SessionAlreadyParked(this ILogger logger);
+
+    [LoggerMessage(EventId = 716, Level = LogLevel.Warning, Message = "[SESSION] Armed, but Chrome is not ready yet; the watchdog will keep trying.")]
+    public static partial void SessionChromeNotReady(this ILogger logger);
+
+    [LoggerMessage(EventId = 717, Level = LogLevel.Warning, Message = "[SESSION] Chrome could not be closed: {Reason}. The hotkeys were released regardless.")]
+    public static partial void SessionChromeCloseFailed(this ILogger logger, string reason);
+
+    [LoggerMessage(EventId = 718, Level = LogLevel.Error, Message = "[SESSION] Switching the bridge {Direction} failed: {Reason}")]
+    public static partial void SessionSwitchFailed(this ILogger logger, string direction, string reason);
+
     [LoggerMessage(EventId = 800, Level = LogLevel.Debug, Message = "[QUEUE] {Depth} commands waiting.")]
     public static partial void CommandQueueBacklog(this ILogger logger, int depth);
 

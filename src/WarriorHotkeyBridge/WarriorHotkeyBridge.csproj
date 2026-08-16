@@ -47,4 +47,24 @@
     <PackageReference Include="Serilog.Sinks.File" />
   </ItemGroup>
 
+  <!--
+    Artwork travels with the application rather than being embedded.
+
+    The tray icons have to be files the running process can read from disk, because the icon is
+    composed at the current DPI's small-icon size at runtime. The deck images are here for the
+    operator: the whole point of shipping them is that they can be browsed to and picked in the
+    Stream Deck software, which an embedded resource could never be.
+
+    The MSI harvests the publish output wholesale, so landing them here is all that is needed to
+    get them installed.
+  -->
+  <ItemGroup>
+    <None Include="..\..\assets\icons\*.png"
+          Link="assets\icons\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\assets\streamdeck\*.png"
+          Link="assets\streamdeck\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

@@ -8,6 +8,10 @@ namespace WarriorHotkeyBridge.Tests;
 /// </summary>
 public class BridgeStateTests
 {
+    /// <remarks>
+    /// Armed explicitly. Every roll-up below is conditional on the bridge being switched on, and
+    /// a helper that left that implicit would be asserting the wrong thing.
+    /// </remarks>
     private static BridgeState Ready() => new()
     {
         Application = ApplicationState.Running,
@@ -15,10 +19,52 @@ public class BridgeStateTests
         WarriorPage = WarriorPageState.Found,
         Level2 = Level2State.Ready,
         Hotkeys = HotkeyState.Registered,
+        Session = SessionState.Armed,
     };
 
     [Fact]
     public void DefaultState_IsStarting() => Assert.Equal(BridgeStatus.Starting, new BridgeState().Status);
+
+    /// <summary>
+    /// Parked outranks everything except startup.
+    /// </summary>
+    /// <remarks>
+    /// Parking releases the hotkeys and closes Chrome, so a parked bridge legitimately has no
+    /// hotkeys and no connection. Every other rule reads that as a failure, which would alarm the
+    /// operator about the exact situation they just asked for by pressing stop.
+    /// </remarks>
+    [Fact]
+    public void Parked_OutranksMissingHotkeysAndChrome()
+    {
+        var parked = new BridgeState
+        {
+            Application = ApplicationState.Running,
+            Chrome = ChromeState.Disconnected,
+            Hotkeys = HotkeyState.Uninitialized,
+            Session = SessionState.Parked,
+        };
+
+        Assert.Equal(BridgeStatus.Parked, parked.Status);
+    }
+
+    /// <summary>
+    /// Startup still wins, so the icon does not flash OFF on the way up before arming completes.
+    /// </summary>
+    [Fact]
+    public void ParkedWhileStarting_IsStillStarting()
+    {
+        var starting = new BridgeState
+        {
+            Application = ApplicationState.Starting,
+            Session = SessionState.Parked,
+        };
+
+        Assert.Equal(BridgeStatus.Starting, starting.Status);
+    }
+
+    [Fact]
+    public void ArmingRestoresTheOrdinaryRollUp() =>
+        Assert.Equal(BridgeStatus.Ready, (Ready() with { Session = SessionState.Armed }).Status);
 
     [Fact]
     public void AllSubsystemsReady_IsReady() => Assert.Equal(BridgeStatus.Ready, Ready().Status);
@@ -63,7 +109,7 @@ public class BridgeStateTests
     [Fact]
     public void FaultDuringStartup_ReportsErrorNotStarting()
     {
-        var state = new BridgeState { Application = ApplicationState.Starting, Chrome = ChromeState.Faulted };
+        var state = new BridgeState { Application = ApplicationState.Starting, Chrome = ChromeState.Faulted, Session = SessionState.Armed };
 
         Assert.Equal(BridgeStatus.Error, state.Status);
     }

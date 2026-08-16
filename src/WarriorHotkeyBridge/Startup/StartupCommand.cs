@@ -10,6 +10,18 @@ namespace WarriorHotkeyBridge.Startup;
 /// </remarks>
 internal static class StartupCommand
 {
+    /// <summary>
+    /// The switch that makes a sign-in launch come up switched off.
+    /// </summary>
+    /// <remarks>
+    /// Signing in is not the same as asking to trade. Without this the bridge armed itself every
+    /// morning, which registered the hotkeys and opened its Chrome profile whether or not a
+    /// session was wanted - and closing that browser by hand simply brought it back, because the
+    /// watchdog treated a running Chrome as an invariant. A manual launch still arms: someone who
+    /// double-clicks the application wants to use it.
+    /// </remarks>
+    public const string ParkedSwitch = "--parked";
+
     /// <summary>Builds the value to store for an executable path.</summary>
     public static string Format(string executablePath)
     {
@@ -18,7 +30,7 @@ internal static class StartupCommand
         // Always quoted, even when the current path happens to have no spaces: the installed
         // location is chosen by the installer, and "Program Files" or a user name with a space
         // would otherwise silently produce a command Windows parses as several arguments.
-        return $"\"{executablePath.Trim('"')}\"";
+        return $"\"{executablePath.Trim('"')}\" {ParkedSwitch}";
     }
 
     /// <summary>

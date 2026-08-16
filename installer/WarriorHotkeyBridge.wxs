@@ -177,17 +177,23 @@
         <Shortcut
             Id="DeckGoShortcut"
             Name="Go Trading"
-            Description="Start the hotkey bridge and its Chrome, and claim F13-F24."
+            Description="Switch the bridge on: claim F13-F24 and open its Chrome."
             Target="[INSTALLFOLDER]WarriorHotkeyBridge.exe"
-            Arguments="--silent"
+            Arguments="--start --silent"
             WorkingDirectory="INSTALLFOLDER" />
 
+        <!--
+          The park switch, not the quit switch. Stopping used to end the process, which released
+          the hotkeys but also took the tray icon with it - so there was nothing left to show that
+          the bridge was off, and nothing to press to switch it back on. Parking leaves it
+          resident and switched off, which is what a stop button on a desk actually means.
+        -->
         <Shortcut
             Id="DeckStopShortcut"
             Name="Stop Trading"
-            Description="Stop the bridge, release F13-F24 to other applications, and close its Chrome."
+            Description="Switch the bridge off: release F13-F24 to other applications and close its Chrome. Stays in the tray."
             Target="[INSTALLFOLDER]WarriorHotkeyBridge.exe"
-            Arguments="--quit --close-chrome --silent"
+            Arguments="--park --silent"
             WorkingDirectory="INSTALLFOLDER" />
 
         <!--

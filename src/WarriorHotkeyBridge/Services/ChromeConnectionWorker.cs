@@ -103,6 +103,15 @@ internal sealed class ChromeConnectionWorker : BackgroundService
         {
             while (!stoppingToken.IsCancellationRequested)
             {
+                // A parked bridge maintains nothing. This loop treating "Chrome is running" as an
+                // invariant of the process being alive is exactly why closing the browser by hand
+                // used to bring it straight back, and why a stop button was not possible.
+                if (_state.Current.Session is SessionState.Parked)
+                {
+                    await Task.Delay(_options.HealthCheckInterval, stoppingToken).ConfigureAwait(false);
+                    continue;
+                }
+
                 // Only from the watchdog, never from the command path: a keypress must not wait
                 // for a browser to boot.
                 await _launcher.EnsureRunningAsync(stoppingToken).ConfigureAwait(false);

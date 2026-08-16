@@ -53,6 +53,8 @@ internal sealed class TrayIconService : IDisposable
     private ToolStripMenuItem? _lastErrorItem;
     private ToolStripMenuItem? _lastCommandItem;
     private ToolStripMenuItem? _startWithWindowsItem;
+    private ToolStripMenuItem? _sessionItem;
+    private ToolStripMenuItem? _reconnectItem;
     private bool _disposed;
 
     /// <summary>
@@ -69,6 +71,7 @@ internal sealed class TrayIconService : IDisposable
     private readonly IUserConfigurationWriter _configurationWriter;
     private readonly IHotkeyPresetProvider _presets;
     private readonly GlobalHotkeyService _hotkeys;
+    private readonly ISessionController _session;
     private readonly CommandQueue _commands;
 
     /// <summary>The open editor, so a second click focuses it rather than opening another.</summary>
@@ -85,6 +88,7 @@ internal sealed class TrayIconService : IDisposable
         IHotkeyPresetProvider presets,
         GlobalHotkeyService hotkeys,
         CommandQueue commands,
+        ISessionController session,
         TimeProvider time,
         ILogger<TrayIconService> logger)
     {
@@ -97,6 +101,7 @@ internal sealed class TrayIconService : IDisposable
         _configurationWriter = configurationWriter;
         _presets = presets;
         _hotkeys = hotkeys;
+        _session = session;
         _commands = commands;
         _time = time;
         _logger = logger;
@@ -181,11 +186,24 @@ internal sealed class TrayIconService : IDisposable
         _startWithWindowsItem = new ToolStripMenuItem("Start with Windows") { CheckOnClick = false };
         _startWithWindowsItem.Click += (_, _) => ToggleStartWithWindows();
 
+        // One item that toggles rather than a Start and a Stop, because only one of them is ever
+        // the right thing to press and a permanently greyed-out twin is just clutter. Its text is
+        // refreshed on every menu open.
+        _sessionItem = new ToolStripMenuItem("Start")
+        {
+            Font = new Font(SystemFonts.MenuFont ?? SystemFonts.DefaultFont, FontStyle.Bold),
+        };
+
+        _sessionItem.Click += (_, _) => ToggleSession();
+
         var configureHotkeys = new ToolStripMenuItem("Configure Hotkeys...");
         configureHotkeys.Click += (_, _) => ShowHotkeyEditor();
 
-        var reconnect = new ToolStripMenuItem("Reconnect to Chrome");
-        reconnect.Click += (_, _) => ReconnectRequested?.Invoke(this, EventArgs.Empty);
+        // Kept separate from Start. Reconnecting is for a session that is on and has lost its
+        // browser; it means nothing while parked, so it is disabled there rather than quietly
+        // doing nothing.
+        _reconnectItem = new ToolStripMenuItem("Reconnect to Chrome");
+        _reconnectItem.Click += (_, _) => ReconnectRequested?.Invoke(this, EventArgs.Empty);
 
         var diagnostics = new ToolStripMenuItem("Run Diagnostics...");
         diagnostics.Click += (_, _) => DiagnosticsRequested?.Invoke(this, EventArgs.Empty);
@@ -212,9 +230,11 @@ internal sealed class TrayIconService : IDisposable
             _lastCommandItem,
             _lastErrorItem,
             new ToolStripSeparator(),
+            _sessionItem,
+            new ToolStripSeparator(),
             configureHotkeys,
             _startWithWindowsItem,
-            reconnect,
+            _reconnectItem,
             diagnostics,
             openLogs,
             copyStatus,
@@ -225,9 +245,78 @@ internal sealed class TrayIconService : IDisposable
         // Re-read on every open rather than caching: the user can change this in Task Manager's
         // Startup apps at any time, and a stale tick would claim the bridge starts at sign-in
         // when Windows has been told otherwise.
-        menu.Opening += (_, _) => RefreshStartWithWindows();
+        menu.Opening += (_, _) =>
+        {
+            RefreshStartWithWindows();
+            RefreshSessionItem();
+        };
 
         return menu;
+    }
+
+    /// <summary>
+    /// Switches the session on or off from the tray.
+    /// </summary>
+    /// <remarks>
+    /// Fire-and-forget onto the thread pool because this runs on the UI thread from a menu click,
+    /// and arming waits on a browser launch. Blocking the message loop there would freeze the tray
+    /// and delay the very hotkeys being registered. The controller marshals the parts that need
+    /// the UI thread back onto it.
+    /// </remarks>
+    private void ToggleSession()
+    {
+        bool arming = _session.State is SessionState.Parked;
+
+        // Reflected immediately rather than waiting for the state change to round-trip, so the
+        // menu item does not read "Start" for the second it takes Chrome to come up.
+        if (_sessionItem is not null)
+        {
+            _sessionItem.Enabled = false;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (arming)
+                {
+                    await _session.ArmAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                else
+                {
+                    await _session.ParkAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                // A resilience boundary: a failed switch must leave the tray usable.
+                _logger.SessionSwitchFailed(arming ? "on" : "off", ex.Message);
+                ShowError(AppInfo.ProductName, $"Could not switch the bridge {(arming ? "on" : "off")}: {ex.Message}");
+            }
+            finally
+            {
+                _ui.Post(() =>
+                {
+                    if (_sessionItem is not null)
+                    {
+                        _sessionItem.Enabled = true;
+                    }
+                });
+            }
+        });
+    }
+
+    private void RefreshSessionItem()
+    {
+        if (_sessionItem is null || _reconnectItem is null)
+        {
+            return;
+        }
+
+        bool armed = _session.State is SessionState.Armed;
+
+        _sessionItem.Text = armed ? "Stop - release hotkeys, close Chrome" : "Start - register hotkeys, open Chrome";
+        _reconnectItem.Enabled = armed;
     }
 
     /// <summary>A non-interactive menu row used purely to display state.</summary>

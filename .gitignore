@@ -46,3 +46,6 @@ id_rsa*
 secrets.json
 .env
 .env.*
+
+# Claude Code local settings: machine-specific paths, not project configuration.
+.claude/

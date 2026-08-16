@@ -3,7 +3,7 @@
 Written for a fresh assistant conversation with no prior context. Everything here was learned the
 expensive way; most of it is not visible from the code alone.
 
-**Last updated:** version 1.1.2, 338 tests passing.
+**Last updated:** version 1.2.0, 343 tests passing.
 
 ---
 
@@ -44,7 +44,7 @@ sent) and reports them differently.
 
 ## 3. Current state
 
-Working tree clean, local == remote, 338 tests, builds with warnings as errors.
+Working tree clean, local == remote, 343 tests, builds with warnings as errors.
 
 **Shipped and working:** hotkeys with reclaim-on-conflict retry; warm CDP connection with watchdog,
 zombie detection and sleep/resume recovery; single-round-trip Level 2 probe (~9 ms steady state);
@@ -54,8 +54,7 @@ Go/Stop shortcuts and button art; hotkey editor with presets and key capture.
 **Verified against a live SIM session.** Real trades executed end to end in 26–47 ms.
 
 **Released:** `v1.0.0` and `v1.1.1` on GitHub, the latter with the MSI attached and marked latest.
-1.1.0 was never released; the version was bumped to 1.1.1 rather than reinstalled over itself, which
-also sidesteps the same-version upgrade trap below. 1.1.1 is installed and signed off on locally.
+1.1.2 (the iframe-focus fix) is installed locally but was never released; 1.2.0 supersedes it.
 
 ## 4. Traps — read this before touching anything
 
@@ -104,6 +103,48 @@ Bit twice: once in a `.csproj` describing `--debug`, once in the `.wxs` describi
 - A form focuses the first control in tab order on `Show`. Anything set up in the constructor that
   depends on focus must be redone in `OnShown`.
 - `DataGridView.AllowUserToAddRows` renders a permanent blank row that reads as a stray record.
+
+### The bridge is armed or parked, and sign-in no longer arms it
+`SessionState` is the on/off switch. **Armed**: hotkeys registered, Chrome launched and maintained.
+**Parked**: hotkeys released so F13–F24 are free for other applications, Chrome left alone, tray
+icon showing the off glyph. `BridgeStatus.Parked` outranks every other rule *except* Starting —
+a parked bridge legitimately has no hotkeys and no connection, which the fault rules would
+otherwise report as an Error the operator just asked for.
+
+This exists because "Chrome is running" used to be an invariant of the process being alive:
+`ChromeConnectionWorker` called `EnsureRunningAsync` on **every watchdog pass**, so closing the
+browser by hand simply brought it back and a stop button was not expressible.
+
+- Sign-in registers `"...exe" --parked` (`StartupCommand.ParkedSwitch`). A manual launch still
+  arms — someone double-clicking the app wants to use it.
+- `--start` / `--park` signal a resident instance through `SessionSignal`, two named events with
+  one handler, copying `ShutdownSignal` exactly. **`--stop` was not reused**: it is an existing
+  alias for `--quit` and repurposing it would silently change every shortcut already using it.
+- The deck's *Stop Trading* shortcut is now `--park --silent`, not `--quit --close-chrome`.
+  Quitting released the hotkeys but took the tray icon with it, so there was nothing left to show
+  the bridge was off and nothing to press to bring it back.
+- `SessionController` orders it deliberately: arming registers hotkeys **before** launching Chrome
+  so the deck is live immediately; parking flips the state **before** closing the browser, or the
+  watchdog relaunches it in the gap and the stop button appears to do nothing.
+
+### Tray artwork has to be a glyph, not an app badge
+The icon is 16×16 at 100% DPI. The first artwork was a rounded-square badge — keyboard, wifi arcs,
+candlesticks, glowing frame — and at 16px it rendered as a coloured smudge; the dark "off" variant
+was near-invisible on the Windows 11 taskbar, which is dark by default. Automatic rescue failed
+too: the badge's outer frame glows as brightly as the glyph inside it, so no luminance threshold
+separates them.
+
+What works is one high-contrast shape on transparency, cropped to its content. `assets/icons/` holds
+the shipped 256px `capturing-on.png` / `capturing-off.png`; the untouched originals live in
+`assets/icons/source/` and are **not** shipped (the csproj glob is non-recursive on purpose).
+Crop matters: the keyboard glyph is 2:1 in a square canvas, so a quarter of the height was padding
+before it was cropped — at 16px that padding is the difference between a shape and a smear.
+
+`TrayIconFactory` composes at runtime: artwork scaled to the current small-icon size, plus a corner
+status dot for Degraded/Error/WaitingForChrome only. Ready gets no dot deliberately — a permanent
+green one is one the eye stops seeing, which would make the amber and red harder to notice. Every
+load failure falls back to the drawn dot, because a tray app that cannot produce an icon has no
+menu and therefore no way to reach anything.
 
 ### The SIM's charts are iframes, and focus beats selection
 The charts are TradingView widgets in `blob:` iframes — four on a normal dashboard. **Clicking
@@ -212,7 +253,7 @@ legible and that the Save button actually disables.
 
 ```powershell
 dotnet build                              # warnings are errors
-dotnet test                               # 338 tests
+dotnet test                               # 343 tests
 pwsh -File installer/Build-Installer.ps1  # publish + MSI -> artifacts/installer/
 ```
 
@@ -238,7 +279,7 @@ an assistant. This covers Ross's Sim Default and the user's own full-deck mappin
 has only twelve F13–F24 available, so three keys need modifiers (`Ctrl+F13`…); key capture handles
 those.
 
-**v1.2.0 — multiple Level 2 panels.** Currently a chord goes to the first panel in DOM order
+**v1.3.0 — multiple Level 2 panels.** Currently a chord goes to the first panel in DOM order
 (`Level2Index` defaults to 0), which is deterministic but not predictable, since rearranging the
 layout changes which is index 0. The `Level2Index` column was removed from the editor for that
 reason. Two SIM *pages* are already correctly refused as ambiguous; two *panels* in one page are not.

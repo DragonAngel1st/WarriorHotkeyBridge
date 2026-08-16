@@ -39,4 +39,22 @@ internal interface IUiDispatcher
     /// </para>
     /// </remarks>
     void Defer(Action action);
+
+    /// <summary>
+    /// Runs <paramref name="action"/> on the UI thread and completes when it has finished.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For work whose completion the caller depends on, which <see cref="Post"/> cannot express -
+    /// it returns as soon as the message is queued. Arming a session needs this: the hotkeys must
+    /// actually be registered before the session is reported as armed, and registration has to
+    /// happen on the UI thread because Win32 delivers <c>WM_HOTKEY</c> only to the registering
+    /// thread's queue.
+    /// </para>
+    /// <para>
+    /// Runs inline when already on the UI thread, so an arm requested from a tray click does not
+    /// deadlock waiting for a message loop it is itself blocking.
+    /// </para>
+    /// </remarks>
+    Task InvokeAsync(Action action);
 }

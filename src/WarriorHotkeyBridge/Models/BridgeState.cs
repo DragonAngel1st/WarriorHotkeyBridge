@@ -49,6 +49,31 @@ internal enum CommandOutcome
 }
 
 /// <summary>
+/// Whether the operator has the bridge switched on.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Parked is a resting state, not a broken one. The tray icon stays, the editor still opens and
+/// the log still runs; what stops is the two things that affect the rest of the machine - the
+/// global hotkeys are released so other applications can use F13-F24, and Chrome is neither
+/// launched nor kept alive.
+/// </para>
+/// <para>
+/// It exists because "Chrome is running" used to be an invariant of the process being alive: the
+/// watchdog relaunched it on every pass, so closing the browser by hand simply brought it back.
+/// Arming is now an explicit act, which is the only honest way to have a stop button.
+/// </para>
+/// </remarks>
+internal enum SessionState
+{
+    /// <summary>Hotkeys released, Chrome left alone. Nothing is listening.</summary>
+    Parked,
+
+    /// <summary>Hotkeys held and Chrome maintained. A keypress will do something.</summary>
+    Armed,
+}
+
+/// <summary>
 /// Roll-up of the individual subsystem states. This is what drives the tray icon colour and
 /// tooltip, so the operator can tell at a glance whether a keypress would do anything.
 /// </summary>
@@ -56,6 +81,16 @@ internal enum BridgeStatus
 {
     /// <summary>Grey - still starting up.</summary>
     Starting,
+
+    /// <summary>
+    /// Switched off by the operator. Not a fault, and reported before every other state.
+    /// </summary>
+    /// <remarks>
+    /// Outranks the rest deliberately. A parked bridge has no hotkeys and no Chrome, which every
+    /// other rule here would read as Error or WaitingForChrome - alarming the operator about the
+    /// exact situation they just asked for.
+    /// </remarks>
+    Parked,
 
     /// <summary>Grey - alive, but Chrome is not connected.</summary>
     WaitingForChrome,
@@ -90,6 +125,9 @@ internal sealed record BridgeState
 
     public HotkeyState Hotkeys { get; init; } = HotkeyState.Uninitialized;
 
+    /// <summary>Whether the operator has switched the bridge on. Starts parked.</summary>
+    public SessionState Session { get; init; } = SessionState.Parked;
+
     /// <summary>Description of the most recent action, e.g. <c>Shift+1 (Buy 75% BP)</c>.</summary>
     public string? LastAction { get; init; }
 
@@ -106,6 +144,14 @@ internal sealed record BridgeState
     {
         get
         {
+            // Before the fault checks, not after. Parking releases the hotkeys and closes Chrome,
+            // so a parked bridge legitimately has no hotkeys registered and no connection - which
+            // every rule below would report as a failure.
+            if (Session is SessionState.Parked && Application is not ApplicationState.Starting)
+            {
+                return BridgeStatus.Parked;
+            }
+
             if (Application is ApplicationState.Faulted
                 || Chrome is ChromeState.Faulted
                 || Hotkeys is HotkeyState.Failed)
@@ -137,6 +183,7 @@ internal static class BridgeStateDescriptions
     public static string Describe(this BridgeStatus status) => status switch
     {
         BridgeStatus.Starting => "STARTING",
+        BridgeStatus.Parked => "OFF",
         BridgeStatus.WaitingForChrome => "WAITING FOR CHROME",
         BridgeStatus.Degraded => "DEGRADED",
         BridgeStatus.Ready => "READY",
