@@ -230,7 +230,7 @@ internal static partial class BridgeLog
     /// iframe and was not - which is invisible from the outside, because the successful outcome
     /// looks exactly like an ordinary press.
     /// </remarks>
-    [LoggerMessage(EventId = 706, Level = LogLevel.Information, Message = "[LEVEL2] Keyboard focus was inside a chart frame; returned it to the page (now on <{Holder}>).")]
+    [LoggerMessage(EventId = 706, Level = LogLevel.Information, Message = "[LEVEL2] Keyboard focus was held by a chart or a text field; released it (now on <{Holder}>).")]
     public static partial void Level2FocusReturned(this ILogger logger, string holder);
 
     [LoggerMessage(EventId = 704, Level = LogLevel.Information, Message = "[LEVEL2] Ready via '{Selector}' (selected={Selected}, panels={Panels}).")]

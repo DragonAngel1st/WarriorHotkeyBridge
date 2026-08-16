@@ -71,24 +71,32 @@ internal sealed record Level2Result
     public bool PageVisible { get; init; }
 
     /// <summary>
-    /// True when browser keyboard focus sits on a child frame rather than the page itself.
+    /// True when whatever holds keyboard focus will consume the chord before the SIM sees it.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// This decides which <em>document</em> receives a dispatched chord, and it outranks every
-    /// other signal here. The SIM's charts are TradingView widgets in iframes; clicking inside one
-    /// moves focus to that frame, and from then on Playwright's keyboard input is delivered there.
-    /// Level 2 never sees the key, however plainly it is the selected FlexLayout component -
-    /// measured on a live session, where a chord arrived in a chart as the first character of its
-    /// symbol search while the bridge correctly reported Level 2 ready.
+    /// This decides whether the chord reaches the SIM's own handler at all, and it outranks every
+    /// other signal here. Two shapes, both measured on a live session, both while the bridge
+    /// correctly reported Level 2 ready:
     /// </para>
     /// <para>
-    /// FlexLayout runs in the parent document and never sees a click that lands inside a frame, so
-    /// its own selection state stays pointing at Level 2 throughout. The two signals genuinely
-    /// disagree, and only this one is about where keystrokes go.
+    /// A focused <b>iframe</b> sends the key to another document entirely. The SIM's charts are
+    /// TradingView widgets, and clicking a graph line moves focus into one; the chord then arrives
+    /// there as the first character of a symbol search. FlexLayout runs in the parent document and
+    /// never sees a click inside a frame, so its selection state goes on pointing at Level 2.
+    /// </para>
+    /// <para>
+    /// A focused <b>text field</b> types the character into itself. This one is worse to diagnose,
+    /// because it happens with Level 2 genuinely selected and active - an order-entry input inside
+    /// the panel holds the caret, and <c>Shift+Digit3</c> becomes a <c>#</c> in that box instead of
+    /// a command.
+    /// </para>
+    /// <para>
+    /// Selection answers which component the SIM would route a key to. This answers whether the
+    /// key ever gets that far. They disagree exactly when it matters.
     /// </para>
     /// </remarks>
-    public bool FocusTrappedInFrame { get; init; }
+    public bool FocusTrapped { get; init; }
 
     /// <summary>
     /// True when the probe could not be executed at all, as opposed to running and reporting
@@ -103,7 +111,7 @@ internal sealed record Level2Result
     public bool IsReady => Status is Level2Status.Ready;
 
     /// <summary>
-    /// This result, refused if a chord dispatched now would be delivered to a child frame.
+    /// This result, refused if a chord dispatched now would be swallowed before the SIM saw it.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -119,31 +127,33 @@ internal sealed record Level2Result
     /// </para>
     /// </remarks>
     public Level2Result RefusedIfFocusTrapped() =>
-        IsReady && FocusTrappedInFrame
+        IsReady && FocusTrapped
             ? this with
             {
                 Status = Level2Status.Found,
-                Reason = "Keyboard focus is inside a chart frame, so the shortcut would have been "
-                    + "typed into the chart instead of Level 2. Click the Level 2 panel once and "
-                    + "press the key again. Nothing was sent.",
+                Reason = "Something on the page still has the keyboard - a chart or a text field - "
+                    + "so the shortcut would have been typed into it rather than acted on. Click "
+                    + "an empty part of the Level 2 panel and press the key again. Nothing was sent.",
             }
             : this;
 }
 
 /// <summary>
-/// Makes the page ready to receive a chord: keyboard focus on the page itself rather than a
-/// child frame, and Level 2 the selected FlexLayout component.
+/// Makes the page ready to receive a chord: nothing holding the keyboard that would consume it,
+/// and Level 2 the selected FlexLayout component.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Both conditions are required and they are independent. Selection decides which component the
-/// SIM routes a key to; focus decides which document the key is delivered to at all. Satisfying
-/// only the second is how a chord came to be typed into a chart's symbol search while every
-/// reported signal said Level 2 was ready.
-/// </remarks>
-/// <remarks>
+/// SIM routes a key to; focus decides whether the key reaches that routing at all. Satisfying only
+/// the second is how a chord came to be typed into a chart's symbol search, and then into an
+/// order-entry field, while every reported signal said Level 2 was ready.
+/// </para>
+/// <para>
 /// Works exclusively through the DOM. No screen coordinates, no mouse movement, no
 /// <c>SendInput</c> - a click here is a Playwright DOM click on the tab header, which cannot
 /// land on an order button even if the layout moves.
+/// </para>
 /// </remarks>
 internal interface ILevel2Controller
 {

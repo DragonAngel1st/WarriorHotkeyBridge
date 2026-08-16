@@ -20,16 +20,41 @@ public class Level2FocusTests
     [Fact]
     public void ReadyButFocusTrappedIsNotDispatchable()
     {
-        var result = new Level2Result { Status = Level2Status.Ready, FocusTrappedInFrame = true };
+        var result = new Level2Result { Status = Level2Status.Ready, FocusTrapped = true };
 
         Level2Result guarded = result.RefusedIfFocusTrapped();
 
         Assert.False(guarded.IsReady);
-        Assert.Contains("chart", guarded.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("keyboard", guarded.Reason, StringComparison.OrdinalIgnoreCase);
 
         // The operator has to be told nothing was sent, because the failure they just saw looks
         // identical to one where the order went through.
         Assert.Contains("Nothing was sent", guarded.Reason, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A focused text field is the same failure as a focused chart, and the harder one to see.
+    /// </summary>
+    /// <remarks>
+    /// Measured live: Level 2 genuinely selected and active, the tabset reporting
+    /// "Level 2 &amp; Order Entry", and <c>document.activeElement</c> an <c>input</c> - an
+    /// order-entry box inside the panel holding the caret. Shift+Digit3 became a "#" typed into
+    /// that box instead of a Buy 100, and the command still logged as sent.
+    ///
+    /// The first version of this guard tested only for an iframe, so this case passed every check.
+    /// The rule is about anything that consumes the chord, not about frames.
+    /// </remarks>
+    [Fact]
+    public void AFocusedTextFieldIsAlsoRefused()
+    {
+        var result = new Level2Result
+        {
+            Status = Level2Status.Ready,
+            IsSelected = true,
+            FocusTrapped = true,
+        };
+
+        Assert.False(result.RefusedIfFocusTrapped().IsReady);
     }
 
     [Fact]
@@ -39,7 +64,7 @@ public class Level2FocusTests
         {
             Status = Level2Status.Ready,
             IsSelected = true,
-            FocusTrappedInFrame = false,
+            FocusTrapped = false,
         };
 
         Assert.Same(result, result.RefusedIfFocusTrapped());
@@ -66,7 +91,7 @@ public class Level2FocusTests
         var result = new Level2Result
         {
             Status = status,
-            FocusTrappedInFrame = true,
+            FocusTrapped = true,
             Reason = "the original reason",
         };
 

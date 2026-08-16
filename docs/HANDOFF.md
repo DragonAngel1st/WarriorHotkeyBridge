@@ -3,7 +3,7 @@
 Written for a fresh assistant conversation with no prior context. Everything here was learned the
 expensive way; most of it is not visible from the code alone.
 
-**Last updated:** version 1.2.1, 347 tests passing.
+**Last updated:** version 1.2.2, 348 tests passing.
 
 ---
 
@@ -44,7 +44,7 @@ sent) and reports them differently.
 
 ## 3. Current state
 
-Working tree clean, local == remote, 347 tests, builds with warnings as errors.
+Working tree clean, local == remote, 348 tests, builds with warnings as errors.
 
 **Shipped and working:** hotkeys with reclaim-on-conflict retry; warm CDP connection with watchdog,
 zombie detection and sleep/resume recovery; single-round-trip Level 2 probe (~9 ms steady state);
@@ -157,7 +157,7 @@ green one is one the eye stops seeing, which would make the amber and red harder
 load failure falls back to the drawn dot, because a tray app that cannot produce an icon has no
 menu and therefore no way to reach anything.
 
-### The SIM's charts are iframes, and focus beats selection
+### Focus beats selection - a chart frame OR a text field
 The charts are TradingView widgets in `blob:` iframes — four on a normal dashboard. **Clicking
 inside one moves browser keyboard focus to that frame**, and CDP delivers a dispatched chord to the
 *focused frame*. Level 2 then never sees the key: TradingView takes the first printable character
@@ -175,11 +175,22 @@ keystroke the bridge had definitely dispatched — a listener on `document` cann
 delivered to that document, so the key had gone to another one. `document.activeElement` in the top
 document was an `<iframe>`, and Playwright's frame tree showed `document.hasFocus()` true inside it.
 
-The fix is in `Level2Controller`: the probe reports `focusInFrame` on the same round trip as
-everything else, and preparation blurs the focused frame to return focus to the page, then re-probes
-to verify. `Level2Result.RefusedIfFocusTrapped()` is the invariant — Ready and focus-trapped must
-never be dispatchable together, on any path. Verified against a live TradingView iframe before
-shipping: `iframe` → blur → `body`.
+**It is not only iframes.** The same failure happens with a focused **text field**, and that one is
+harder to see: Level 2 genuinely selected, tabset reporting "Level 2 & Order Entry", and
+`document.activeElement` an `input` — an order-entry box inside the panel holding the caret.
+`Shift+Digit3` became a `#` typed into that box. The first version of the guard tested only for
+`tagName === 'IFRAME'`, so this sailed through every check; it shipped in 1.2.1 and was found in
+1.2.2. **The rule is about anything that consumes the chord, not about frames.**
+
+`FocusTrapPredicate` in `Level2Controller` is the single definition — `IFRAME`, `INPUT`, `TEXTAREA`,
+`SELECT`, `isContentEditable` — interpolated into *both* the probe and the repair, because having
+the test in one and the fix in the other is exactly how the input case was missed.
+
+Preparation blurs whatever holds focus, then re-probes to verify.
+`Level2Result.RefusedIfFocusTrapped()` is the invariant — Ready and focus-trapped must never be
+dispatchable together, on any path. Verified live before shipping, on a real order-entry field
+holding a share size: `input` → blur → `body`, **value unchanged**. That last part matters — a
+bridge that cleared a share size on the way to placing an order would be worse than the bug.
 
 Two reporting faults fell out of this and are fixed too. The Level 2 selection lines were **Debug**
 while the operator runs at Information, so the log could not say whether targeting had done anything
@@ -264,7 +275,7 @@ legible and that the Save button actually disables.
 
 ```powershell
 dotnet build                              # warnings are errors
-dotnet test                               # 347 tests
+dotnet test                               # 348 tests
 pwsh -File installer/Build-Installer.ps1  # publish + MSI -> artifacts/installer/
 ```
 

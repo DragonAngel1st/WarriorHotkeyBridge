@@ -230,9 +230,9 @@ internal sealed class DiagnosticsService : IDiagnosticsService
             // Separate from selection on purpose: these two disagree in exactly the case that
             // matters, and a report showing only the first says everything is fine while a chord
             // would land in a chart.
-            Line(report, "Keyboard focus", level2.FocusTrappedInFrame
-                ? "IN A CHILD FRAME (a chart) - the command path will return it to the page"
-                : "on the page");
+            Line(report, "Keyboard focus", level2.FocusTrapped
+                ? "HELD (a chart frame or a text field) - the command path will release it"
+                : "on the page, nothing intercepting");
 
             Line(report, "Probe failed", level2.ProbeFailed ? "YES" : "no");
         }
