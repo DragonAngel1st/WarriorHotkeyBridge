@@ -245,7 +245,7 @@ internal static class Program
                 Log.Information(
                     "First run: wrote a commented example configuration to {UserConfig}. "
                     + "Nothing in it is active yet - it explains the format and lists examples to copy "
-                    + "into the Bindings section. F23 (Test) and F24 (Diagnostics) work now and send nothing.",
+                    + "into the Bindings section. Use Test targeting in the hotkey editor to check the setup without sending anything.",
                     paths.UserConfigFile);
             }
 

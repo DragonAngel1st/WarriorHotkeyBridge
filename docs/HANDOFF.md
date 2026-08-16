@@ -3,7 +3,7 @@
 Written for a fresh assistant conversation with no prior context. Everything here was learned the
 expensive way; most of it is not visible from the code alone.
 
-**Last updated:** version 1.2.4, 351 tests passing.
+**Last updated:** version 1.2.5, 352 tests passing.
 
 ---
 
@@ -44,7 +44,7 @@ sent) and reports them differently.
 
 ## 3. Current state
 
-Working tree clean, local == remote, 351 tests, builds with warnings as errors.
+Working tree clean, local == remote, 352 tests, builds with warnings as errors.
 
 **Shipped and working:** hotkeys with reclaim-on-conflict retry; warm CDP connection with watchdog,
 zombie detection and sleep/resume recovery; single-round-trip Level 2 probe (~9 ms steady state);
@@ -103,6 +103,17 @@ Bit twice: once in a `.csproj` describing `--debug`, once in the `.wxs` describi
 - A form focuses the first control in tab order on `Show`. Anything set up in the constructor that
   depends on focus must be redone in `OnShown`.
 - `DataGridView.AllowUserToAddRows` renders a permanent blank row that reads as a stray record.
+
+### The shipped appsettings must bind no keys
+Configuration layers merge **per key, not per object**. A binding shipped in the application's own
+`appsettings.json` and rebound in the operator's user file merges into a single entry carrying BOTH
+`Send` and `Action` — which the resolver rejects. So rebinding a shipped key silently costs the
+operator that key, and the shipped default reappears at every restart, overwriting their edit.
+
+F23 and F24 shipped as Test and Diagnostics on the assumption that nobody would rebind spare keys.
+Someone did. Both actions are reachable from the UI — Test targeting in the editor, Run Diagnostics
+in the tray — so neither needs to cost a deck key. `ShippedBindingsTests` reads the file that
+actually ships and fails if any binding is added back.
 
 ### The bridge is armed or parked, and sign-in no longer arms it
 `SessionState` is the on/off switch. **Armed**: hotkeys registered, Chrome launched and maintained.
@@ -286,7 +297,7 @@ legible and that the Save button actually disables.
 
 ```powershell
 dotnet build                              # warnings are errors
-dotnet test                               # 351 tests
+dotnet test                               # 352 tests
 pwsh -File installer/Build-Installer.ps1  # publish + MSI -> artifacts/installer/
 ```
 

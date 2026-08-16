@@ -5,11 +5,17 @@ namespace WarriorHotkeyBridge.Startup;
 /// </summary>
 /// <remarks>
 /// <para>
-/// A fresh install has no trading bindings at all - only the two shipped defaults, which send
-/// nothing. That is deliberate: an installer that put live buy and sell bindings on a stranger's
-/// machine would be reckless. It does mean the application does nothing useful until the operator
-/// authors a configuration file, and learning a format from documentation before the first success
-/// is a poor way to begin.
+/// A fresh install has no bindings at all. That is deliberate: an installer that put live buy and
+/// sell bindings on a stranger's machine would be reckless. It does mean the application does
+/// nothing useful until the operator authors a configuration file, and learning a format from
+/// documentation before the first success is a poor way to begin.
+/// </para>
+/// <para>
+/// Nothing ships pre-bound either, not even the two safe non-dispatching actions that used to sit
+/// on F23 and F24. Configuration layers merge per key rather than per object, so a binding shipped
+/// in the application's own file and rebound in the operator's merges into a single entry carrying
+/// both Send and Action - which the resolver rejects. Rebinding a "spare" key therefore cost the
+/// operator that key, and put the shipped default back on every restart.
 /// </para>
 /// <para>
 /// The template resolves that without weakening the rule. Every binding in it is commented out, so
@@ -82,7 +88,7 @@ internal static class StarterConfiguration
           "// EXAMPLE F14": { "Send": "Shift+Digit2", "Label": "describe it here - the bridge only logs this" },
           "// EXAMPLE F15": { "Send": "Control+KeyQ", "Label": "a Ctrl chord" },
 
-          "// ALREADY BOUND": "F23 and F24 come bound by the shipped defaults to Test and Diagnostics. Both send nothing and are always safe to press. Press F23 first: it exercises the whole targeting pipeline without delivering a keystroke, so a success proves everything except the dispatch itself.",
+          "// NOTHING IS BOUND FOR YOU": "Every key here is yours. Nothing ships pre-bound, because a shipped binding merges with yours into one entry carrying both Send and Action, which is rejected - so rebinding it would cost you the key. To check your setup without sending anything, use Test targeting in the hotkey editor; for a diagnostic report, use Run Diagnostics in the tray menu.",
 
           "Hotkeys": {
             "Bindings": {

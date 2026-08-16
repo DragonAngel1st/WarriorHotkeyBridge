@@ -567,6 +567,17 @@ internal sealed class Level2Controller : ILevel2Controller
             };
         }
 
+        // The click itself can re-trap focus - selecting the tab hands the keyboard to something
+        // inside the panel - so releasing it once before the click is not enough. Observed live:
+        // the release fired, the tab was clicked, and focus was held again immediately afterwards.
+        // It only reached the SIM because preparation retries once, which meant every command in
+        // that state spent its entire retry budget on a condition guaranteed to recur. Releasing
+        // again here keeps the retry for genuine transients.
+        if (verified.FocusTrapped)
+        {
+            verified = await ReturnFocusToPageAsync(page, index, verified, cancellationToken).ConfigureAwait(false);
+        }
+
         return verified.RefusedIfFocusTrapped();
     }
 
