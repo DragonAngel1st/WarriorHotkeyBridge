@@ -135,9 +135,16 @@
 
       <!--
         The operator's data folder. The installer creates nothing in it except the Deck
-        subdirectory below - configuration, logs, the startup preference and the Chrome profile
-        are all written by the application and must survive uninstall, so they are deliberately
-        not MSI resources.
+        subdirectory below - configuration, logs, the startup preference, saved presets and the
+        Chrome profile are all written by the application and must survive uninstall, so they are
+        deliberately not MSI resources.
+
+        Do not add a Directory element here for Presets, however convenient it looks. An MSI that
+        creates a directory owns it, and an owned directory is a candidate for removal both on
+        uninstall and during the remove-then-install half of every upgrade - which this package
+        performs on each install, because RemoveExistingProducts is scheduled afterInstallValidate.
+        Presets are hand-made work that must outlive the product. The application creates that
+        folder itself on startup, which keeps the installer away from it entirely.
       -->
       <Directory Id="UserDataFolder" Name="WarriorHotkeyBridge">
         <Directory Id="DECKFOLDER" Name="Deck" />

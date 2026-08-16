@@ -96,7 +96,7 @@ internal sealed class HotkeyPresetProvider : IHotkeyPresetProvider
     public HotkeyPresetProvider(AppPaths paths) => _paths = paths;
 
     /// <summary>Where the operator's own presets go. Created on demand, not at startup.</summary>
-    public string UserPresetDirectory => Path.Combine(_paths.Root, FolderName);
+    public string UserPresetDirectory => _paths.Presets;
 
     public IReadOnlyList<HotkeyPreset> Load()
     {

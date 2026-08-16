@@ -22,6 +22,7 @@ internal sealed class AppPaths
         State = Path.Combine(root, "State");
         Diagnostics = Path.Combine(root, "Diagnostics");
         ChromeProfile = Path.Combine(root, "ChromeProfile");
+        Presets = Path.Combine(root, "Presets");
     }
 
     /// <summary>%LOCALAPPDATA%\WarriorHotkeyBridge</summary>
@@ -41,6 +42,25 @@ internal sealed class AppPaths
 
     /// <summary>Default dedicated Chrome profile, used when configuration leaves it blank.</summary>
     public string ChromeProfile { get; }
+
+    /// <summary>
+    /// The operator's own hotkey presets.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Created by the application, deliberately never by the installer. An MSI that creates a
+    /// directory also owns it, and an owned directory is one the installer may remove on uninstall
+    /// or during the remove-then-install half of an upgrade. Presets are the operator's work and
+    /// must outlive both, so the installer is kept away from this path entirely.
+    /// </para>
+    /// <para>
+    /// Created eagerly rather than on first save, because it is a place the operator is told to
+    /// put files - restoring a backup, or taking a layout from another machine. A folder that only
+    /// appears once you have already saved a preset from the editor is no use to someone who has
+    /// one and nowhere to put it.
+    /// </para>
+    /// </remarks>
+    public string Presets { get; }
 
     /// <summary>The user-editable configuration file. May legitimately not exist.</summary>
     public string UserConfigFile => Path.Combine(Configuration, "appsettings.json");
@@ -80,6 +100,10 @@ internal sealed class AppPaths
         Directory.CreateDirectory(paths.Configuration);
         Directory.CreateDirectory(paths.State);
         Directory.CreateDirectory(paths.Diagnostics);
+
+        // CreateDirectory is a no-op on an existing directory and never touches its contents, so
+        // this is safe to run on every start against a folder full of the operator's presets.
+        Directory.CreateDirectory(paths.Presets);
 
         return paths;
     }

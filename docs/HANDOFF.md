@@ -3,7 +3,7 @@
 Written for a fresh assistant conversation with no prior context. Everything here was learned the
 expensive way; most of it is not visible from the code alone.
 
-**Last updated:** version 1.2.5, 352 tests passing.
+**Last updated:** version 1.2.6, 354 tests passing.
 
 ---
 
@@ -44,7 +44,7 @@ sent) and reports them differently.
 
 ## 3. Current state
 
-Working tree clean, local == remote, 352 tests, builds with warnings as errors.
+Working tree clean, local == remote, 354 tests, builds with warnings as errors.
 
 **Shipped and working:** hotkeys with reclaim-on-conflict retry; warm CDP connection with watchdog,
 zombie detection and sleep/resume recovery; single-round-trip Level 2 probe (~9 ms steady state);
@@ -103,6 +103,18 @@ Bit twice: once in a `.csproj` describing `--debug`, once in the `.wxs` describi
 - A form focuses the first control in tab order on `Show`. Anything set up in the constructor that
   depends on focus must be redone in `OnShown`.
 - `DataGridView.AllowUserToAddRows` renders a permanent blank row that reads as a stray record.
+
+### The installer must never own the presets folder
+`%LOCALAPPDATA%\WarriorHotkeyBridge\Presets` is created by **`AppPaths.CreateAndEnsure`**, never by the
+MSI. An MSI that creates a directory owns it, and an owned directory is a candidate for removal on
+uninstall *and* during the remove-then-install half of every upgrade — which this package performs
+on each install, since `RemoveExistingProducts` is scheduled `afterInstallValidate`. Presets are
+hand-made work that must outlive the product, so the installer is kept away from that path
+entirely; the `.wxs` carries a comment saying so.
+
+It is created eagerly rather than on first save because it is somewhere the operator is *told* to
+put files — restoring a backup, or carrying a layout between machines. A folder that only appears
+after you have saved a preset is no use to someone who already has one and nowhere to put it.
 
 ### The shipped appsettings must bind no keys
 Configuration layers merge **per key, not per object**. A binding shipped in the application's own
@@ -297,7 +309,7 @@ legible and that the Save button actually disables.
 
 ```powershell
 dotnet build                              # warnings are errors
-dotnet test                               # 352 tests
+dotnet test                               # 354 tests
 pwsh -File installer/Build-Installer.ps1  # publish + MSI -> artifacts/installer/
 ```
 
