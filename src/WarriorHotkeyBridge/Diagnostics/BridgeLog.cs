@@ -177,6 +177,14 @@ internal static partial class BridgeLog
     [LoggerMessage(EventId = 507, Level = LogLevel.Information, Message = "[CHROME] Launching the dedicated Chrome instance with profile {Profile}")]
     public static partial void ChromeLaunching(this ILogger logger, string profile);
 
+    /// <remarks>
+    /// Information, and worth a line every time: it records that the configured path was wrong and
+    /// what was used instead, which is the difference between a machine that works and a support
+    /// question about a button that does nothing.
+    /// </remarks>
+    [LoggerMessage(EventId = 509, Level = LogLevel.Information, Message = "[CHROME] Not at {ConfiguredPath}; using {ResolvedPath} instead.")]
+    public static partial void ChromeFoundElsewhere(this ILogger logger, string configuredPath, string resolvedPath);
+
     [LoggerMessage(EventId = 508, Level = LogLevel.Warning, Message = "[CHROME] Could not launch Chrome: {Reason}")]
     public static partial void ChromeLaunchFailed(this ILogger logger, string reason);
 

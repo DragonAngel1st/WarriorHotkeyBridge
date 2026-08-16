@@ -3,7 +3,7 @@
 Written for a fresh assistant conversation with no prior context. Everything here was learned the
 expensive way; most of it is not visible from the code alone.
 
-**Last updated:** version 1.2.3, 348 tests passing.
+**Last updated:** version 1.2.4, 351 tests passing.
 
 ---
 
@@ -44,7 +44,7 @@ sent) and reports them differently.
 
 ## 3. Current state
 
-Working tree clean, local == remote, 348 tests, builds with warnings as errors.
+Working tree clean, local == remote, 351 tests, builds with warnings as errors.
 
 **Shipped and working:** hotkeys with reclaim-on-conflict retry; warm CDP connection with watchdog,
 zombie detection and sleep/resume recovery; single-round-trip Level 2 probe (~9 ms steady state);
@@ -123,6 +123,13 @@ browser by hand simply brought it back and a stop button was not expressible.
 - The deck's *Stop Trading* shortcut is now `--park --silent`, not `--quit --close-chrome`.
   Quitting released the hotkeys but took the tray icon with it, so there was nothing left to show
   the bridge was off and nothing to press to bring it back.
+- **Chrome is found, not assumed.** `ChromeOptions.ExecutablePath` defaults to the 64-bit Program
+  Files location, which is one of at least four. A 32-bit install is under Program Files (x86); a
+  per-user install - no administrator needed, so the kind on a machine set up for someone else - is
+  under the user AppData. `ChromeLauncher.CandidateExecutables` tries the `App Paths` registry entry
+  first (authoritative, and the only one that finds a custom location) then the three literal paths.
+  A configured path that exists always wins, so naming a specific channel still works. Before this,
+  Start simply could not work on such a machine and the only remedy was hand-editing JSON.
 - **Arming is idempotent, and that is load-bearing.** `ArmAsync` returning early when already armed
   skipped the Chrome launch, so pressing Go Trading with the session armed but the browser closed
   did nothing at all - the state most in need of the button. Registration is skipped on that path;
@@ -279,7 +286,7 @@ legible and that the Save button actually disables.
 
 ```powershell
 dotnet build                              # warnings are errors
-dotnet test                               # 348 tests
+dotnet test                               # 351 tests
 pwsh -File installer/Build-Installer.ps1  # publish + MSI -> artifacts/installer/
 ```
 
