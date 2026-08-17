@@ -81,6 +81,16 @@ internal sealed record CommandLineOptions
     /// </remarks>
     public bool StartParked { get; init; }
 
+    /// <summary>
+    /// Clear the session state - Chrome profile, logs, diagnostics, startup preference - and exit.
+    /// </summary>
+    /// <remarks>
+    /// Never touches the configuration file or the presets folder. Run by the installer before it
+    /// starts the upgraded application, so "reinstall it cleanly" is one action rather than a set
+    /// of instructions relayed down a telephone.
+    /// </remarks>
+    public bool Reset { get; init; }
+
     public static CommandLineOptions Parse(IReadOnlyList<string> args)
     {
         ArgumentNullException.ThrowIfNull(args);
@@ -95,6 +105,7 @@ internal sealed record CommandLineOptions
         bool start = false;
         bool park = false;
         bool startParked = false;
+        bool reset = false;
         List<string> configurationArgs = [];
         List<string> unknown = [];
 
@@ -142,6 +153,10 @@ internal sealed record CommandLineOptions
                 case "off":
                     park = true;
                     continue;
+                case "reset":
+                case "clean":
+                    reset = true;
+                    continue;
                 case "parked":
                     startParked = true;
                     continue;
@@ -170,6 +185,7 @@ internal sealed record CommandLineOptions
             Start = start,
             Park = park,
             StartParked = startParked,
+            Reset = reset,
             ConfigurationArgs = configurationArgs,
             UnknownArgs = unknown,
         };
@@ -210,6 +226,9 @@ internal sealed record CommandLineOptions
                                  launching with no options; pressing it twice is harmless.
           --park, --off          Switch the bridge off: release the hotkeys and close Chrome,
                                  leaving the tray icon running. Does nothing if not resident.
+          --reset, --clean       Clear the Chrome profile, logs, diagnostics and startup
+                                 preference, then exit. Your hotkeys and presets are NOT touched,
+                                 and the bindings are snapshotted into presets first.
           --parked               Start resident but switched off. Used by the sign-in
                                  registration so a session begins only when you ask for one.
           --quit, --stop         Ask a running instance to exit cleanly, then exit.

@@ -312,6 +312,31 @@
         Return="ignore" />
 
     <!--
+      Clear stale session state so an install is a genuinely clean start.
+
+      Runs the newly installed executable, after the files are in place, so the behaviour is the
+      new version's rather than whatever was there before. It removes the dedicated Chrome
+      profile, logs, diagnostics reports and the startup preference - and deliberately not the
+      configuration file or the presets folder, which hold hand-made trading bindings and saved
+      layouts that may exist nowhere else. The application snapshots the live bindings into
+      presets before deleting anything, so they can be reloaded from the editor even if something
+      goes wrong.
+
+      Return="ignore" because a stale Chrome profile is not worth failing an install over: the
+      alternative is an operator left with no bridge at all.
+
+      Set SKIPCLEAN=1 to install without it:
+        msiexec /i WarriorHotkeyBridge-Setup-x64.msi SKIPCLEAN=1
+    -->
+    <CustomAction
+        Id="ResetSessionState"
+        Directory="INSTALLFOLDER"
+        ExeCommand="&quot;[INSTALLFOLDER]WarriorHotkeyBridge.exe&quot; --reset --silent"
+        Execute="immediate"
+        Impersonate="yes"
+        Return="ignore" />
+
+    <!--
       Start the bridge once installation finishes.
 
       Without this the installer completes silently and nothing is running: no tray icon, no
@@ -359,7 +384,15 @@
         undo, whereas the failure it prevents is silently dead trading hotkeys discovered at the
         worst possible moment.
       -->
-      <Custom Action="LaunchBridge" After="InstallFinalize" Condition="NOT REMOVE=&quot;ALL&quot;" />
+      <!--
+        After InstallFinalize so the new executable is fully in place, and before LaunchBridge so
+        the application starts against already-cleared state rather than deleting a Chrome profile
+        out from under a session it has just begun. Skipped on uninstall, and skippable outright
+        with SKIPCLEAN=1 for an ordinary in-place update.
+      -->
+      <Custom Action="ResetSessionState" After="InstallFinalize" Condition="NOT REMOVE=&quot;ALL&quot; AND NOT SKIPCLEAN" />
+
+      <Custom Action="LaunchBridge" After="ResetSessionState" Condition="NOT REMOVE=&quot;ALL&quot;" />
     </InstallExecuteSequence>
 
   </Package>

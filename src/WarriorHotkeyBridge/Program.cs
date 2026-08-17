@@ -136,6 +136,32 @@ internal static class Program
             return ExitShutdownTimedOut;
         }
 
+        // Before the instance guard and before logging is configured, because it deletes the log
+        // directory - a configured rolling sink would be holding a file inside it. Run by the
+        // installer between replacing the files and starting the application.
+        if (cli.Reset)
+        {
+            ConsoleHost.EnsureConsole(allocateIfMissing: !cli.Silent);
+
+            try
+            {
+                AppPaths resetPaths = AppPaths.CreateAndEnsure();
+
+                foreach (string line in SessionReset.Run(resetPaths, DateTimeOffset.Now))
+                {
+                    WriteLineIfConsole(line);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Never fail the install over this. The application is perfectly usable with a
+                // stale Chrome profile, and the operator would be left with no bridge at all.
+                WriteLineIfConsole($"Reset did not complete: {ex.Message}");
+            }
+
+            return ExitSuccess;
+        }
+
         // Before the instance guard, like --quit: this process is not trying to become the bridge,
         // it is asking the resident one to switch off. Taking the mutex would make it look like a
         // rejected second instance.

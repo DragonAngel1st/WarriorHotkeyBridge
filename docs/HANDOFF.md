@@ -3,7 +3,7 @@
 Written for a fresh assistant conversation with no prior context. Everything here was learned the
 expensive way; most of it is not visible from the code alone.
 
-**Last updated:** version 1.2.6, 354 tests passing.
+**Last updated:** version 1.2.7, 359 tests passing.
 
 ---
 
@@ -44,7 +44,7 @@ sent) and reports them differently.
 
 ## 3. Current state
 
-Working tree clean, local == remote, 354 tests, builds with warnings as errors.
+Working tree clean, local == remote, 359 tests, builds with warnings as errors.
 
 **Shipped and working:** hotkeys with reclaim-on-conflict retry; warm CDP connection with watchdog,
 zombie detection and sleep/resume recovery; single-round-trip Level 2 probe (~9 ms steady state);
@@ -103,6 +103,27 @@ Bit twice: once in a `.csproj` describing `--debug`, once in the `.wxs` describi
 - A form focuses the first control in tab order on `Show`. Anything set up in the constructor that
   depends on focus must be redone in `OnShown`.
 - `DataGridView.AllowUserToAddRows` renders a permanent blank row that reads as a stray record.
+
+### Installing clears stale state — by an allowlist, never a wildcard
+Every install runs `WarriorHotkeyBridge.exe --reset --silent` between `InstallFinalize` and the
+launch, so "reinstall it cleanly" is one double-click rather than instructions relayed down a
+telephone to someone who cannot follow them. It removes the **Chrome profile, logs, diagnostics
+reports and the startup preference**.
+
+**It must never remove `Configuration` or `Presets`.** Those hold live trading bindings and saved
+layouts that may exist nowhere else, and this runs from an installer on a machine whose owner cannot
+be talked through a recovery. `SessionReset` deletes an explicit allowlist of four folders resolved
+from `AppPaths` — never a wildcard, never the root — so the worst a mistake here can do is cost a
+log folder. It also snapshots the live bindings into `Presets\backup-before-reset-<stamp>.json`
+first, which is belt and braces: `Configuration` survives regardless, but a copy the operator can
+reload from a dropdown turns "my keys are gone" into a non-event.
+
+`SKIPCLEAN=1` does a straight in-place update:
+`msiexec /i WarriorHotkeyBridge-Setup-x64.msi SKIPCLEAN=1`. Clean is the default deliberately, to
+rule stale state out of a diagnosis; flip it once that stops being the common case.
+
+`--reset` is handled **before logging is configured**, because it deletes the log directory and a
+configured rolling sink would be holding a file inside it.
 
 ### The installer must never own the presets folder
 `%LOCALAPPDATA%\WarriorHotkeyBridge\Presets` is created by **`AppPaths.CreateAndEnsure`**, never by the
@@ -309,7 +330,7 @@ legible and that the Save button actually disables.
 
 ```powershell
 dotnet build                              # warnings are errors
-dotnet test                               # 354 tests
+dotnet test                               # 359 tests
 pwsh -File installer/Build-Installer.ps1  # publish + MSI -> artifacts/installer/
 ```
 
