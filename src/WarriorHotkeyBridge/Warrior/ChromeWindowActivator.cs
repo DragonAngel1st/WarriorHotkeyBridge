@@ -86,7 +86,61 @@ internal sealed partial class ChromeWindowActivator : IPageActivator
             ShowWindow(window, SwRestore);
         }
 
-        if (SetForegroundWindow(window))
+        return RaiseToForeground(window);
+    }
+
+    /// <summary>
+    /// Brings a window to the foreground, and confirms it actually got there.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>SetForegroundWindow</c> alone is not enough, and worse, it does not say so. Windows
+    /// refuses a foreground steal from a process that does not already own the foreground: it
+    /// flashes the taskbar button instead, and the call still reports success. That is precisely
+    /// the situation here - the bridge is a background tray application and the operator has just
+    /// clicked a different window. Measured on a live session: with a scanner open in a second
+    /// Chrome window, every raise reported success, no failure was ever logged, and the chord went
+    /// nowhere useful because the Level 2 window never actually became active.
+    /// </para>
+    /// <para>
+    /// Attaching our input queue to the current foreground thread lifts that restriction for the
+    /// duration of the call, which is the long-standing Win32 remedy. The attachment is always
+    /// undone, including when the raise fails.
+    /// </para>
+    /// <para>
+    /// The return value is then ignored in favour of asking Windows what the foreground window
+    /// actually is. Trusting the reported success is what hid this.
+    /// </para>
+    /// </remarks>
+    private bool RaiseToForeground(nint window)
+    {
+        nint foreground = GetForegroundWindow();
+
+        if (foreground == window)
+        {
+            return true;
+        }
+
+        uint us = GetCurrentThreadId();
+        uint owner = foreground == 0 ? 0 : GetWindowThreadProcessId(foreground, out _);
+        bool attached = owner != 0 && owner != us && AttachThreadInput(us, owner, true);
+
+        try
+        {
+            SetForegroundWindow(window);
+            BringWindowToTop(window);
+        }
+        finally
+        {
+            if (attached)
+            {
+                AttachThreadInput(us, owner, false);
+            }
+        }
+
+        // Verified, not assumed. A raise that was silently declined has to be reported, because
+        // the command path is about to deliver a trading chord to whatever is actually in front.
+        if (GetForegroundWindow() == window)
         {
             return true;
         }
@@ -380,4 +434,25 @@ internal sealed partial class ChromeWindowActivator : IPageActivator
     /// <summary>Per-monitor DPI of the window's display. 96 means 100% scaling.</summary>
     [LibraryImport("user32.dll")]
     private static partial uint GetDpiForWindow(nint window);
+
+    [LibraryImport("user32.dll")]
+    private static partial nint GetForegroundWindow();
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool BringWindowToTop(nint window);
+
+    /// <remarks>
+    /// Attaching to the foreground thread is what lets <see cref="SetForegroundWindow"/> actually
+    /// take effect from a background process. Every attach is paired with a detach.
+    /// </remarks>
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool AttachThreadInput(uint attachTo, uint attachFrom, [MarshalAs(UnmanagedType.Bool)] bool attach);
+
+    [LibraryImport("user32.dll")]
+    private static partial uint GetWindowThreadProcessId(nint window, out uint processId);
+
+    [LibraryImport("kernel32.dll")]
+    private static partial uint GetCurrentThreadId();
 }

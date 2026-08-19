@@ -3,7 +3,7 @@
 Written for a fresh assistant conversation with no prior context. Everything here was learned the
 expensive way; most of it is not visible from the code alone.
 
-**Last updated:** version 1.2.7, 359 tests passing.
+**Last updated:** version 1.2.8, 359 tests passing.
 
 ---
 
@@ -124,6 +124,30 @@ rule stale state out of a diagnosis; flip it once that stops being the common ca
 
 `--reset` is handled **before logging is configured**, because it deletes the log directory and a
 configured rolling sink would be holding a file inside it.
+
+### `SetForegroundWindow` reports success without raising anything
+Windows refuses a foreground steal from a process that does not already own the foreground. It
+flashes the taskbar button instead — and **the call still returns true**. The bridge is a background
+tray application, so every raise attempted while the operator was in another window was declined,
+reported as successful, and logged nothing.
+
+It stayed hidden because the Level 2 window was normally already in front. Running a **scanner in a
+second Chrome window** is what exposed it: click a ticker there, press a trading key, and the chord
+was delivered to a page whose window never came forward — so the SIM ignored it and no order row
+appeared at all, not even a rejection.
+
+`RaiseToForeground` does two things about it. It attaches our input queue to the current foreground
+thread for the duration of the call, which is the long-standing Win32 remedy for the restriction.
+Then it **ignores the return value and asks `GetForegroundWindow` what actually happened** — a raise
+that was silently declined is now logged as a failure instead of being reported as success. Trusting
+that return value is what hid this for a week.
+
+The fast path is unchanged in cost: if the window is already foreground it returns after a single
+`GetForegroundWindow` and calls nothing else.
+
+**Latency, measured over 60 live commands** — worth knowing before optimising the wrong thing:
+targeting 36.2 ms (73%), dispatch 9.3 ms (19%), activation 3.8 ms (8%), **everything else including
+all logging 0.06 ms (0%)**. Turning logging off would buy nothing; the cost is CDP round trips.
 
 ### The installer must never own the presets folder
 `%LOCALAPPDATA%\WarriorHotkeyBridge\Presets` is created by **`AppPaths.CreateAndEnsure`**, never by the
