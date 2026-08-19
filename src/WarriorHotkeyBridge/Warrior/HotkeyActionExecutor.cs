@@ -90,11 +90,12 @@ internal sealed class HotkeyActionExecutor : IHotkeyActionExecutor
 
         // ---- Preparation: safe to retry ----
         IPage? page = null;
+        Level2Result? level2 = null;
         string? failure = null;
 
         for (int attempt = 1; attempt <= PreparationAttempts; attempt++)
         {
-            (page, failure) = await PrepareAsync(action, cancellationToken).ConfigureAwait(false);
+            (page, level2, failure) = await PrepareAsync(action, cancellationToken).ConfigureAwait(false);
 
             if (page is not null)
             {
@@ -128,13 +129,28 @@ internal sealed class HotkeyActionExecutor : IHotkeyActionExecutor
 
             try
             {
-                bool raised = await _activator.ActivateAsync(page, cancellationToken).ConfigureAwait(false);
+                ActivationOutcome outcome = await _activator
+                    .ActivateAsync(page, cancellationToken)
+                    .ConfigureAwait(false);
 
-                if (!raised)
+                if (outcome is ActivationOutcome.NotRaised)
                 {
                     // The tab is active even when the window could not be raised, so a chord will
                     // still land correctly. Worth a log line, not worth refusing to trade.
                     _logger.CommandWindowNotRaised();
+                }
+
+                // Coming back from another window is the one case where the SIM needs waking, and
+                // having had to touch the foreground is exactly what identifies it. Bringing the
+                // window forward fires no focus event in the page - the renderer never considered
+                // it blurred - so the SIM goes on ignoring shortcuts until a trusted interaction
+                // arrives. Press after press within the same window costs nothing extra: the
+                // window is already in front, and this is skipped.
+                if (outcome.NeedsReactivation() && level2 is not null)
+                {
+                    await _level2
+                        .ReactivateAsync(page, action.Level2Index, level2, cancellationToken)
+                        .ConfigureAwait(false);
                 }
             }
             catch (Exception ex) when (ex is PlaywrightException or TimeoutException)
@@ -253,7 +269,7 @@ internal sealed class HotkeyActionExecutor : IHotkeyActionExecutor
     /// <summary>
     /// Verifies the connection, the target page and Level 2, selecting Level 2 if needed.
     /// </summary>
-    private async Task<(IPage? Page, string? Failure)> PrepareAsync(
+    private async Task<(IPage? Page, Level2Result? Level2, string? Failure)> PrepareAsync(
         HotkeyAction action,
         CancellationToken cancellationToken)
     {
@@ -261,14 +277,14 @@ internal sealed class HotkeyActionExecutor : IHotkeyActionExecutor
         {
             if (!await _chrome.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false))
             {
-                return (null, "Chrome is not connected.");
+                return (null, null, "Chrome is not connected.");
             }
 
             WarriorPageResult located = await _locator.LocateAsync(cancellationToken).ConfigureAwait(false);
 
             if (located.Status is not WarriorPageStatus.PageFound || located.Page is null)
             {
-                return (null, located.Reason ?? "the Warrior SIM page was not found");
+                return (null, null, located.Reason ?? "the Warrior SIM page was not found");
             }
 
             // Fail closed on a genuinely ambiguous target. The locator's tie-break prefers a
@@ -278,7 +294,7 @@ internal sealed class HotkeyActionExecutor : IHotkeyActionExecutor
             // is acceptable for a status readout; it is not acceptable for an order.
             if (located.WasAmbiguous)
             {
-                return (null,
+                return (null, null,
                     $"{located.Candidates.Count(c => c.IsEligible)} SIM pages contain a Level 2 panel and "
                     + "cannot be told apart. Close the extra one so the target is unambiguous.");
             }
@@ -287,13 +303,16 @@ internal sealed class HotkeyActionExecutor : IHotkeyActionExecutor
                 .EnsureSelectedAsync(located.Page, action.Level2Index, cancellationToken)
                 .ConfigureAwait(false);
 
+            // The Level 2 result travels back with the page so the wake-up click can reuse what
+            // this probe already measured - which selector matched, whether the tab has a label
+            // element - instead of asking the page all over again on the command path.
             return level2.IsReady
-                ? (located.Page, null)
-                : (null, level2.Reason ?? "Level 2 could not be selected");
+                ? (located.Page, level2, null)
+                : (null, null, level2.Reason ?? "Level 2 could not be selected");
         }
         catch (Exception ex) when (ex is PlaywrightException or TimeoutException)
         {
-            return (null, ex.Message);
+            return (null, null, ex.Message);
         }
     }
 

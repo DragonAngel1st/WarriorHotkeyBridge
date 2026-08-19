@@ -111,6 +111,16 @@ internal sealed record Level2Result
     public bool IsReady => Status is Level2Status.Ready;
 
     /// <summary>
+    /// Whether there is a tab header to click - the only element the bridge will ever click.
+    /// </summary>
+    /// <remarks>
+    /// False when Level 2 has been popped out into its own window, which has no FlexLayout tab
+    /// bar. Clicking anyway would mean picking some other element in a panel made almost entirely
+    /// of order controls, which is not a trade this code is willing to make for a wake-up.
+    /// </remarks>
+    public bool HasClickableTab => MatchedSelector is not null && HasTabBar;
+
+    /// <summary>
     /// This result, refused if a chord dispatched now would be swallowed before the SIM saw it.
     /// </summary>
     /// <remarks>
@@ -179,4 +189,31 @@ internal interface ILevel2Controller
     /// that may already have been delivered must never be repeated automatically.
     /// </remarks>
     Task<Level2Result> EnsureSelectedAsync(IPage page, int index, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Gives the page a trusted interaction, so the SIM starts honouring shortcuts again.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The SIM decides whether it is the active application by listening for real focus events,
+    /// and it ignores keyboard shortcuts until it gets one. Raising the Chrome window does not
+    /// produce one: as far as the renderer is concerned that page never lost focus, so no
+    /// <c>focus</c> or <c>focusin</c> fires and the SIM stays asleep. Measured live - the chord
+    /// arrived at <c>&lt;body&gt;</c>, with <c>document.hasFocus()</c> true and
+    /// <c>defaultPrevented</c> false, and the SIM did nothing with it.
+    /// </para>
+    /// <para>
+    /// Synthesising a <c>FocusEvent</c> was tried and does not work; the SIM checks
+    /// <c>isTrusted</c>. Only a real interaction wakes it, which is why this clicks the tab
+    /// header - the one element in the panel that is not an order control.
+    /// </para>
+    /// <para>
+    /// This also explains why the fault was intermittent. When Level 2 was not the selected
+    /// component the bridge clicked that same tab to select it, and incidentally woke the SIM;
+    /// when it was already selected the click was skipped, and so was the wake-up.
+    /// </para>
+    /// </remarks>
+    /// <param name="target">The result that located Level 2, reused so this costs no extra probe.</param>
+    /// <returns>True if a trusted click was delivered.</returns>
+    Task<bool> ReactivateAsync(IPage page, int index, Level2Result target, CancellationToken cancellationToken);
 }

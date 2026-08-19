@@ -44,7 +44,7 @@ sent) and reports them differently.
 
 ## 3. Current state
 
-Working tree clean, local == remote, 359 tests, builds with warnings as errors.
+Working tree clean, local == remote, 365 tests, builds with warnings as errors.
 
 **Shipped and working:** hotkeys with reclaim-on-conflict retry; warm CDP connection with watchdog,
 zombie detection and sleep/resume recovery; single-round-trip Level 2 probe (~9 ms steady state);
@@ -53,8 +53,10 @@ Go/Stop shortcuts and button art; hotkey editor with presets and key capture.
 
 **Verified against a live SIM session.** Real trades executed end to end in 26–47 ms.
 
-**Released:** `v1.0.0`, `v1.1.1` and `v1.2.0` on GitHub, each with the MSI attached. `v1.2.1`
-follows immediately: 1.2.0 shipped with Start unable to launch Chrome on a fresh install.
+**Released:** through `v1.2.8` on GitHub, each with the MSI attached. `v1.2.9` is the one that
+matters: it carries the wake-up click, which is the fix for the failure the user hit for days —
+keystrokes silently doing nothing after working in another window. Confirmed on the live session
+before it was written, by performing the click by hand.
 
 ## 4. Traps — read this before touching anything
 
@@ -148,6 +150,57 @@ The fast path is unchanged in cost: if the window is already foreground it retur
 **Latency, measured over 60 live commands** — worth knowing before optimising the wrong thing:
 targeting 36.2 ms (73%), dispatch 9.3 ms (19%), activation 3.8 ms (8%), **everything else including
 all logging 0.06 ms (0%)**. Turning logging off would buy nothing; the cost is CDP round trips.
+
+### Raising the window does not wake the SIM — only a trusted click does
+This is the sequel to the section above, and it is the harder half. Getting the Chrome window in
+front is necessary and **not sufficient**: the SIM decides whether it is the active application by
+listening for real focus events, and a window raise fires none. As far as the renderer is
+concerned that page never lost focus — so no `focus`, no `focusin`, and the SIM goes on ignoring
+every shortcut until it receives one.
+
+Symptom: click in *anything* else — a second Chrome window, a text selection on another page,
+VS Code — then press a trading key. Nothing happens. Nothing at all: no order, no rejection, no
+error. Manually clicking the Level 2 panel fixes it until the next time you leave.
+
+**Everything the bridge could measure said it was working**, which is what made this take days:
+right page, chord delivered to `<body>`, `document.hasFocus()` true, `defaultPrevented` false,
+correct `key` and `code`, arriving at the exact millisecond of the `SENT` line. A capture-phase
+listener on the top document *saw the keystroke arrive*. The page received it and chose to do
+nothing with it.
+
+Four hypotheses died to measurement before the real one: the window raise (it worked — verified
+with `GetForegroundWindow`), the chart iframe (`activeElement` was `body`), `document.hasFocus()`
+(true), and text selection on another page (removing it changed nothing). Each was killed rather
+than built on.
+
+**A synthesised `FocusEvent` does not work.** It was tried on the live page and the SIM ignored it;
+it checks `isTrusted`. Only a real interaction counts, which is why `Level2Controller.ReactivateAsync`
+performs a Playwright click on the **tab header** — the one element in a panel made almost entirely
+of order controls that is safe to click.
+
+This also explains the intermittency, and the explanation is worth keeping. When Level 2 was *not*
+the selected component, the bridge clicked that same tab to select it and woke the SIM **by
+accident**. When it was already selected, the click was skipped — and so, unknowingly, was the
+wake-up. The bug therefore appeared to depend on which panel you had last touched, which is why it
+looked random.
+
+The trigger is deliberately narrow: `ActivationOutcome` distinguishes **`AlreadyInFront`** from
+**`Raised`** and **`NotRaised`**, and the wake-up runs only for the latter two. Having had to touch
+the foreground *is* the signal that the operator was elsewhere. Press after press within the SIM
+costs nothing extra — that path returns after a single `GetForegroundWindow`.
+
+Cost when it does run: one `EvaluateAsync` hit test, one forced click, one focus release — roughly
+20 ms, once, on the first press after coming back. The hit test exists to avoid the alternative:
+Playwright's checked click waits for the page to stop repainting and measured ~200 ms on a live
+dashboard. The main probe deliberately does **not** run that hit test on the already-selected path,
+because `getBoundingClientRect` forces a layout reflow and that path runs on every command; the
+wake-up pays for its own reflow instead of charging every keystroke for it.
+
+Two invariants that must survive any rewrite here. The bridge clicks the **tab header and nothing
+else** — `Level2Result.HasClickableTab` is false when the panel has been popped out into its own
+window, and a missed wake-up costs one keystroke while a stray click costs a position. And the
+wake-up **never fails a command**: if the click cannot be delivered it logs and sends the chord
+anyway, because the page may well have been awake already.
 
 ### The installer must never own the presets folder
 `%LOCALAPPDATA%\WarriorHotkeyBridge\Presets` is created by **`AppPaths.CreateAndEnsure`**, never by the
@@ -354,7 +407,7 @@ legible and that the Save button actually disables.
 
 ```powershell
 dotnet build                              # warnings are errors
-dotnet test                               # 359 tests
+dotnet test                               # 365 tests
 pwsh -File installer/Build-Installer.ps1  # publish + MSI -> artifacts/installer/
 ```
 

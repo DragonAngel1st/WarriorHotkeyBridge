@@ -241,6 +241,20 @@ internal static partial class BridgeLog
     [LoggerMessage(EventId = 706, Level = LogLevel.Information, Message = "[LEVEL2] Keyboard focus was held by a chart or a text field; released it (now on <{Holder}>).")]
     public static partial void Level2FocusReturned(this ILogger logger, string holder);
 
+    /// <remarks>
+    /// The counterpart to <see cref="CommandWindowNotRaised"/>, and the line that explains an
+    /// otherwise baffling log: raising Chrome's window does not tell the SIM's page it is active
+    /// again, so a chord could arrive at a perfectly ready page and be ignored. Information level
+    /// because it marks the boundary between "the operator was elsewhere" and "they are back",
+    /// which is the first thing to look for when a keystroke did nothing.
+    /// </remarks>
+    [LoggerMessage(EventId = 708, Level = LogLevel.Information, Message = "[LEVEL2] Woke the SIM with a trusted click on its tab ({Mode} click); the window had been in the background.")]
+    public static partial void Level2Reactivated(this ILogger logger, string mode);
+
+    /// <inheritdoc cref="Level2Reactivated"/>
+    [LoggerMessage(EventId = 709, Level = LogLevel.Warning, Message = "[LEVEL2] Could not click the Level 2 tab to wake the SIM ({Reason}); the shortcut was sent regardless.")]
+    public static partial void Level2ReactivationFailed(this ILogger logger, string reason);
+
     [LoggerMessage(EventId = 704, Level = LogLevel.Information, Message = "[LEVEL2] Ready via '{Selector}' (selected={Selected}, panels={Panels}).")]
     public static partial void Level2Ready(this ILogger logger, string selector, bool selected, int panels);
 

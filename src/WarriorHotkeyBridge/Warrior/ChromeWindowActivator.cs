@@ -8,13 +8,46 @@ using WarriorHotkeyBridge.Diagnostics;
 
 namespace WarriorHotkeyBridge.Warrior;
 
+/// <summary>
+/// What activating the page had to do, which decides whether the SIM needs waking up.
+/// </summary>
+/// <remarks>
+/// The distinction is not cosmetic. The SIM stops honouring hotkeys once its page has been
+/// blurred, and only a trusted interaction brings it back - so the bridge has to know whether the
+/// operator had been somewhere else. Having to raise the window is exactly that signal.
+/// </remarks>
+internal enum ActivationOutcome
+{
+    /// <summary>The window was already in front; nothing was disturbed and nothing is needed.</summary>
+    AlreadyInFront,
+
+    /// <summary>The window was brought forward, so the page has been away and needs reactivating.</summary>
+    Raised,
+
+    /// <summary>The window could not be raised. The tab is still active, so a chord may yet land.</summary>
+    NotRaised,
+}
+
+internal static class ActivationOutcomes
+{
+    /// <summary>
+    /// Whether the page has to be woken before it will honour a shortcut.
+    /// </summary>
+    /// <remarks>
+    /// True whenever the window was not already in front, including when the raise failed. Both
+    /// mean the operator had been somewhere else, which is the condition that leaves the SIM
+    /// ignoring keystrokes; whether Windows granted the foreground change says nothing about it.
+    /// </remarks>
+    public static bool NeedsReactivation(this ActivationOutcome outcome) =>
+        outcome is not ActivationOutcome.AlreadyInFront;
+}
+
 internal interface IPageActivator
 {
     /// <summary>
     /// Makes the page the active tab and raises its Chrome window above other applications.
     /// </summary>
-    /// <returns>True if the Chrome window was raised; false if only the tab could be activated.</returns>
-    Task<bool> ActivateAsync(IPage page, CancellationToken cancellationToken);
+    Task<ActivationOutcome> ActivateAsync(IPage page, CancellationToken cancellationToken);
 
     /// <summary>Drops the cached window handle, e.g. after the target page changes.</summary>
     void Invalidate();
@@ -65,7 +98,7 @@ internal sealed partial class ChromeWindowActivator : IPageActivator
         _cachedWindow = 0;
     }
 
-    public async Task<bool> ActivateAsync(IPage page, CancellationToken cancellationToken)
+    public async Task<ActivationOutcome> ActivateAsync(IPage page, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(page);
 
@@ -78,7 +111,7 @@ internal sealed partial class ChromeWindowActivator : IPageActivator
         if (window == 0)
         {
             _logger.ChromeWindowNotResolved();
-            return false;
+            return ActivationOutcome.NotRaised;
         }
 
         if (IsIconic(window))
@@ -112,13 +145,15 @@ internal sealed partial class ChromeWindowActivator : IPageActivator
     /// actually is. Trusting the reported success is what hid this.
     /// </para>
     /// </remarks>
-    private bool RaiseToForeground(nint window)
+    private ActivationOutcome RaiseToForeground(nint window)
     {
         nint foreground = GetForegroundWindow();
 
+        // Already in front is reported distinctly from having raised it, and not merely to save
+        // work: it means the operator never left, so the SIM is still awake and needs nothing.
         if (foreground == window)
         {
-            return true;
+            return ActivationOutcome.AlreadyInFront;
         }
 
         uint us = GetCurrentThreadId();
@@ -142,11 +177,11 @@ internal sealed partial class ChromeWindowActivator : IPageActivator
         // the command path is about to deliver a trading chord to whatever is actually in front.
         if (GetForegroundWindow() == window)
         {
-            return true;
+            return ActivationOutcome.Raised;
         }
 
         _logger.ChromeWindowRaiseFailed(Marshal.GetLastWin32Error());
-        return false;
+        return ActivationOutcome.NotRaised;
     }
 
     private async Task<nint> ResolveWindowAsync(IPage page, CancellationToken cancellationToken)

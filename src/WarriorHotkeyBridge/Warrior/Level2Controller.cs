@@ -517,19 +517,11 @@ internal sealed class Level2Controller : ILevel2Controller
             }).RefusedIfFocusTrapped();
         }
 
-        // Text-filtered before indexing, matching the probe exactly. Without the filter, Nth
-        // would index into every element the selector matched rather than into Level 2 panels.
-        ILocator target = page.Locator(located.MatchedSelector!)
-            .Filter(new LocatorFilterOptions { HasText = _options.Level2TabText })
-            .Nth(index);
-
         try
         {
             // Aims at the tab header's own label element where one exists - never an order
             // control. Whether it exists came back with the probe, so this costs no round trip.
-            ILocator safeTarget = located.HasContentChild
-                ? target.Locator($".{_options.TabButtonContentClass}")
-                : target;
+            ILocator safeTarget = TabHeaderLocator(page, index, located);
 
             // Our own hit test already confirmed the tab is the topmost element at the click
             // point, so Playwright's checks can be skipped - measured at ~190ms of a ~200ms
@@ -598,12 +590,7 @@ internal sealed class Level2Controller : ILevel2Controller
     {
         try
         {
-            string holder = await page
-                .EvaluateAsync<string>(ReturnFocusScript)
-                .WaitAsync(_options.ProbeTimeout, cancellationToken)
-                .ConfigureAwait(false);
-
-            _logger.Level2FocusReturned(holder);
+            await ReleaseFocusAsync(page, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is PlaywrightException or TimeoutException)
         {
@@ -619,5 +606,142 @@ internal sealed class Level2Controller : ILevel2Controller
         // held the result carries it, and every return path out of EnsureSelectedAsync
         // runs it through RefusedIfFocusTrapped.
         return await LocateAsync(page, index, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Hit test on its own, for the wake-up click on a tab that is already selected.
+    /// </summary>
+    /// <remarks>
+    /// The main probe deliberately skips this test once Level 2 is selected, because
+    /// <c>getBoundingClientRect</c> forces a layout reflow and that path runs on every single
+    /// command. The wake-up click needs the answer but runs only after the operator has been in
+    /// another window, so it pays for the reflow itself instead of charging every keystroke for
+    /// it. One round trip well spent: knowing the tab is clear turns a ~200ms checked click into
+    /// a ~10ms forced one.
+    /// </remarks>
+    private const string ClickPointClearScript = """
+        ({ selector, expectedText, contentClass, index }) => {
+          const wanted = expectedText.toLowerCase();
+          let nodes;
+
+          try {
+            nodes = Array.from(document.querySelectorAll(selector));
+          } catch {
+            return false;
+          }
+
+          const el = nodes.filter(n => ((n.textContent || '').toLowerCase()).includes(wanted))[index];
+
+          if (!el) return false;
+
+          const clickEl = (contentClass ? el.querySelector('.' + contentClass) : null) || el;
+          const r = clickEl.getBoundingClientRect();
+
+          if (r.width <= 0 || r.height <= 0) return false;
+
+          const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+
+          return top !== null && (top === el || el.contains(top));
+        }
+        """;
+
+    public async Task<bool> ReactivateAsync(
+        IPage page,
+        int index,
+        Level2Result target,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+        ArgumentNullException.ThrowIfNull(target);
+
+        // No tab bar means the panel has been popped out into its own window. There is no header
+        // to click there, and raising that window is a real activation of it in any case.
+        if (!target.HasClickableTab)
+        {
+            return false;
+        }
+
+        bool clicked = false;
+
+        try
+        {
+            // Reuses the probe's answer where it has one - the selection path already ran the hit
+            // test - and only asks the page when it does not.
+            bool clear = target.ClickTargetOnTop ?? await page
+                .EvaluateAsync<bool>(
+                    ClickPointClearScript,
+                    new
+                    {
+                        selector = target.MatchedSelector,
+                        expectedText = _options.Level2TabText,
+                        contentClass = target.HasContentChild ? _options.TabButtonContentClass : null,
+                        index,
+                    })
+                .WaitAsync(_options.ProbeTimeout, cancellationToken)
+                .ConfigureAwait(false);
+
+            // When something covers the tab - a dialog the operator opened, most likely - forcing
+            // the click would land on that instead. Fall back to Playwright's own checks, which
+            // wait for it to clear and report honestly when it does not.
+            await TabHeaderLocator(page, index, target)
+                .ClickAsync(new LocatorClickOptions
+                {
+                    Timeout = _options.SelectionTimeoutMs,
+                    Force = clear,
+                })
+                .ConfigureAwait(false);
+
+            clicked = true;
+            _logger.Level2Reactivated(clear ? "fast" : "checked");
+
+            // The click can hand the keyboard to something inside the panel, exactly as the
+            // selection click does - and a chord delivered into an order-entry box is the bug
+            // this whole class exists to prevent. Blurring an element does not blur the document,
+            // so this cannot undo the wake-up that just happened.
+            await ReleaseFocusAsync(page, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is PlaywrightException or TimeoutException)
+        {
+            // Never fails the command. A SIM left asleep costs one keystroke that does nothing;
+            // refusing to send would cost the same keystroke and add a false alarm on top - and
+            // if the page was in fact still awake, sending works.
+            _logger.Level2ReactivationFailed(ex.Message);
+        }
+
+        return clicked;
+    }
+
+    /// <summary>
+    /// The Level 2 tab header, aimed at its inner label where there is one - never an order control.
+    /// </summary>
+    /// <remarks>
+    /// Text-filtered before indexing, matching the probe exactly. Without the filter, Nth would
+    /// index into everything the selector matched rather than into Level 2 panels.
+    /// </remarks>
+    private ILocator TabHeaderLocator(IPage page, int index, Level2Result located)
+    {
+        ILocator tab = page.Locator(located.MatchedSelector!)
+            .Filter(new LocatorFilterOptions { HasText = _options.Level2TabText })
+            .Nth(index);
+
+        return located.HasContentChild ? tab.Locator($".{_options.TabButtonContentClass}") : tab;
+    }
+
+    /// <summary>
+    /// Blurs whatever is holding the keyboard, and logs what holds it afterwards.
+    /// </summary>
+    /// <remarks>
+    /// Throws rather than swallowing, because the two callers want opposite things from a failure:
+    /// preparation turns it into a refusal to dispatch, while the wake-up click sends the chord
+    /// anyway. Deciding that here would take the choice away from both.
+    /// </remarks>
+    private async Task ReleaseFocusAsync(IPage page, CancellationToken cancellationToken)
+    {
+        string holder = await page
+            .EvaluateAsync<string>(ReturnFocusScript)
+            .WaitAsync(_options.ProbeTimeout, cancellationToken)
+            .ConfigureAwait(false);
+
+        _logger.Level2FocusReturned(holder);
     }
 }
