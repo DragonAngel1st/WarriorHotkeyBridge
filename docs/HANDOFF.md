@@ -44,7 +44,7 @@ sent) and reports them differently.
 
 ## 3. Current state
 
-Working tree clean, local == remote, 365 tests, builds with warnings as errors.
+Working tree clean, local == remote, 380 tests, builds with warnings as errors.
 
 **Shipped and working:** hotkeys with reclaim-on-conflict retry; warm CDP connection with watchdog,
 zombie detection and sleep/resume recovery; single-round-trip Level 2 probe (~9 ms steady state);
@@ -150,6 +150,33 @@ The fast path is unchanged in cost: if the window is already foreground it retur
 **Latency, measured over 60 live commands** — worth knowing before optimising the wrong thing:
 targeting 36.2 ms (73%), dispatch 9.3 ms (19%), activation 3.8 ms (8%), **everything else including
 all logging 0.06 ms (0%)**. Turning logging off would buy nothing; the cost is CDP round trips.
+
+### The SIM host can change overnight, and did
+On 2026-08-21 Warrior moved the SIM from `sim.warriortrading.com` to **`sim2.warriortrading.com`**
+with no notice. Every key stopped working. The bridge was behaving perfectly: hotkeys registered,
+Chrome connected, CDP talking — and no page it was permitted to touch, because the host gate is an
+**exact** match and the dashboard was one character off.
+
+The log said `No open page has host sim.warriortrading.com`, which was true and almost useless: the
+page was open, right there, on a host the message did not mention. Reading Chrome's own target list
+(`curl http://127.0.0.1:9222/json/list`) is what found it in under a minute — **that is the first
+thing to do whenever the bridge says it cannot find the SIM.**
+
+`AllowedHosts` is now a list, and both hosts ship accepted. Three things about it that matter:
+
+- **Still exact, per entry.** A suffix or wildcard test on `warriortrading.com` would have survived
+  the move — and would also let a chord reach the chatroom, which the operator has open every day.
+  One morning of downtime is the cheaper side of that trade.
+- **`AllowedHost` (singular) is the emergency lever**, and it **adds** rather than replaces. It is
+  one line an operator can be talked through over the phone the next time this happens, without
+  waiting for a release. Additive is deliberate: a line left in the user's file after the fix ships
+  must not quietly narrow the bridge to a host that has since been abandoned — that is precisely
+  how the F23/F24 bindings went wrong.
+- **`AllowedHosts` (plural) replaces**, so an operator who deliberately narrows the list gets what
+  they asked for; an empty or blank one falls back to the built-in list rather than to nothing,
+  because refusing everything is safe but presents as "the bridge stopped working" with no clue why.
+
+The failure message now names every accepted host.
 
 ### Raising the window does not wake the SIM — only a trusted click does
 This is the sequel to the section above, and it is the harder half. Getting the Chrome window in
@@ -407,7 +434,7 @@ legible and that the Save button actually disables.
 
 ```powershell
 dotnet build                              # warnings are errors
-dotnet test                               # 365 tests
+dotnet test                               # 380 tests
 pwsh -File installer/Build-Installer.ps1  # publish + MSI -> artifacts/installer/
 ```
 

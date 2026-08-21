@@ -169,7 +169,7 @@ internal sealed class DiagnosticsService : IDiagnosticsService
     private async Task AppendWarriorAsync(StringBuilder report, CancellationToken cancellationToken)
     {
         Section(report, "WARRIOR SIM");
-        Line(report, "Allowed host", _warriorOptions.AllowedHost);
+        Line(report, "Allowed hosts", string.Join(", ", _warriorOptions.EffectiveAllowedHosts));
         Line(report, "Expected title", _warriorOptions.ExpectedTitle);
 
         WarriorPageResult located;

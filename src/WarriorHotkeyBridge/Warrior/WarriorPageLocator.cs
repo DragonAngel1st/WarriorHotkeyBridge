@@ -71,7 +71,7 @@ internal sealed class WarriorPageLocator : IWarriorPageLocator
         IPage cached = cache.Page;
 
         // Free: Playwright keeps the URL up to date from frame navigation events.
-        if (!WarriorTargetValidator.IsAllowedHost(cached.Url, _options.AllowedHost))
+        if (!WarriorTargetValidator.IsAllowedHost(cached.Url, _options.EffectiveAllowedHosts))
         {
             Invalidate();
             return null;
@@ -92,7 +92,7 @@ internal sealed class WarriorPageLocator : IWarriorPageLocator
             {
                 if (!ReferenceEquals(page, cached)
                     && !page.IsClosed
-                    && WarriorTargetValidator.IsAllowedHost(page.Url, _options.AllowedHost))
+                    && WarriorTargetValidator.IsAllowedHost(page.Url, _options.EffectiveAllowedHosts))
                 {
                     return null;
                 }
@@ -218,9 +218,9 @@ internal sealed class WarriorPageLocator : IWarriorPageLocator
                 Candidates = candidates,
                 ProbeFailed = anyProbeFailed,
                 Reason = candidates.Any(c => c.HostMatches)
-                    ? $"A page on {_options.AllowedHost} is open but its title does not contain "
+                    ? $"A page on {DescribeAllowedHosts()} is open but its title does not contain "
                         + $"\"{_options.ExpectedTitle}\"."
-                    : $"No open page has host {_options.AllowedHost}.",
+                    : $"No open page is on {DescribeAllowedHosts()}.",
             };
         }
 
@@ -277,7 +277,7 @@ internal sealed class WarriorPageLocator : IWarriorPageLocator
                 return (null, false);
             }
 
-            bool hostMatches = WarriorTargetValidator.IsAllowedHost(page.Url, _options.AllowedHost);
+            bool hostMatches = WarriorTargetValidator.IsAllowedHost(page.Url, _options.EffectiveAllowedHosts);
 
             // Only interrogate pages that already passed the host gate: calling into an
             // arbitrary page costs a round trip and tells us nothing we are allowed to act on.
@@ -343,4 +343,13 @@ internal sealed class WarriorPageLocator : IWarriorPageLocator
             _logger.WarriorPageCandidate(candidate.Describe());
         }
     }
+
+    /// <summary>The accepted hosts, phrased for a human reading a failure line.</summary>
+    /// <remarks>
+    /// Naming every accepted host rather than just the first is the point. The morning Warrior
+    /// moved the SIM to <c>sim2</c>, the log said only "No open page has host
+    /// sim.warriortrading.com" - true, and it took a look at Chrome's own target list to see that
+    /// the page was sitting right there on a host one character different.
+    /// </remarks>
+    private string DescribeAllowedHosts() => string.Join(" or ", _options.EffectiveAllowedHosts);
 }

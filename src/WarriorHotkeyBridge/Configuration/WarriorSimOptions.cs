@@ -12,12 +12,70 @@ internal sealed class WarriorSimOptions
     public const string SectionName = "WarriorSim";
 
     /// <summary>
-    /// Exact host that a page must have to be considered a Warrior SIM page.
-    /// Compared with <see cref="StringComparison.OrdinalIgnoreCase"/> against
-    /// <see cref="Uri.Host"/> - never a substring match.
+    /// One extra host to accept, on top of <see cref="DefaultAllowedHosts"/>.
     /// </summary>
-    [Required(AllowEmptyStrings = false)]
-    public string AllowedHost { get; init; } = "sim.warriortrading.com";
+    /// <remarks>
+    /// <para>
+    /// Kept as a scalar, and additive rather than replacing, because it is the setting an
+    /// operator can be talked through over the phone when Warrior next moves the SIM: one line
+    /// in the user configuration file gets them trading again without waiting for a release.
+    /// </para>
+    /// <para>
+    /// Additive matters. It means such an emergency line cannot later become a trap that quietly
+    /// narrows the bridge to a host Warrior has since abandoned - which is exactly the shape of
+    /// the F23/F24 binding bug, where a value left in the user file kept overriding a fixed
+    /// default. Leaving this set costs nothing.
+    /// </para>
+    /// </remarks>
+    public string? AllowedHost { get; init; }
+
+    /// <summary>
+    /// Exact hosts a page may have to be considered a Warrior SIM page. Compared with
+    /// <see cref="StringComparison.OrdinalIgnoreCase"/> against <see cref="Uri.Host"/> - never a
+    /// substring match.
+    /// </summary>
+    /// <inheritdoc cref="Level2Selectors" path="/remarks/para[2]"/>
+    public string[] AllowedHosts { get; init; } = [];
+
+    /// <summary>Used when configuration supplies no hosts at all.</summary>
+    /// <remarks>
+    /// Both are live. Warrior moved the SIM to <c>sim2</c> on 2026-08-21 without notice; keeping
+    /// the old host accepted costs nothing and means an operator who has not been moved yet, or
+    /// gets moved back, is not broken by the fix for the ones who have.
+    /// </remarks>
+    public static readonly string[] DefaultAllowedHosts =
+    [
+        "sim.warriortrading.com",
+        "sim2.warriortrading.com",
+    ];
+
+    /// <summary>The hosts to actually accept. Never empty, so the bridge cannot fail open.</summary>
+    /// <remarks>
+    /// Never empty is the important half: an empty list would make
+    /// <see cref="Warrior.WarriorTargetValidator.IsAllowedHost(string?, IReadOnlyList{string})"/>
+    /// reject everything, which is safe, but it would present as "the bridge stopped working" with
+    /// no clue why. Falling back to the built-in list keeps a mangled configuration recoverable.
+    /// </remarks>
+    public IReadOnlyList<string> EffectiveAllowedHosts
+    {
+        get
+        {
+            List<string> hosts = [.. AllowedHosts.Where(h => !string.IsNullOrWhiteSpace(h))];
+
+            if (hosts.Count == 0)
+            {
+                hosts.AddRange(DefaultAllowedHosts);
+            }
+
+            if (!string.IsNullOrWhiteSpace(AllowedHost)
+                && !hosts.Contains(AllowedHost, StringComparer.OrdinalIgnoreCase))
+            {
+                hosts.Add(AllowedHost);
+            }
+
+            return hosts;
+        }
+    }
 
     /// <summary>Substring the page title is expected to contain.</summary>
     [Required(AllowEmptyStrings = false)]
