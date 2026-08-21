@@ -53,10 +53,15 @@ Go/Stop shortcuts and button art; hotkey editor with presets and key capture.
 
 **Verified against a live SIM session.** Real trades executed end to end in 26–47 ms.
 
-**Released:** through `v1.2.8` on GitHub, each with the MSI attached. `v1.2.9` is the one that
-matters: it carries the wake-up click, which is the fix for the failure the user hit for days —
-keystrokes silently doing nothing after working in another window. Confirmed on the live session
-before it was written, by performing the click by hand.
+**Released:** through `v1.2.10` on GitHub, each with the MSI attached.
+
+`v1.2.9` carries the wake-up click — the fix for the failure the user hit for days, keystrokes
+silently doing nothing after working in another window. Confirmed on the live session before it was
+written, by performing the click by hand, and **confirmed again in live trading on 2026-08-21**.
+
+`v1.2.10` accepts both SIM hosts, after Warrior moved the dashboard to `sim2` overnight and every
+key stopped working. Installed and verified against the live session the same morning: the bridge
+finds `sim2` from the shipped default, with no override in the user's file.
 
 ## 4. Traps — read this before touching anything
 
